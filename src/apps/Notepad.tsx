@@ -14,22 +14,22 @@ const Area = styled.textarea`
 `;
 
 export function NotepadApp() {
-  const [text, setText] = useState("ようこそ Wenge OS へ！\n\nここは Windows 95 風メモ帳です。\n- ボタン\n- テキスト入力\n- チェックボックス\nを体験できます。");
+  const [text, setText] = useState("Welcome to Wenge OS!\n\nThis is a Windows 95-style Notepad.\n- Buttons\n- Text input\n- Checkboxes\nYou can try them here.");
   const [wrap, setWrap] = useState(true);
-  const [title, setTitle] = useState("無題");
+  const [title, setTitle] = useState("Untitled");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="ファイル名" style={{ flex: 1 }} />
-        <Button onClick={() => alert(`保存しました: ${title}\n文字数: ${text.length}`)}>保存</Button>
-        <Button onClick={() => setText("")}>新規</Button>
+        <TextInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="File name" style={{ flex: 1 }} />
+        <Button onClick={() => alert(`Saved: ${title}\nCharacters: ${text.length}`)}>Save</Button>
+        <Button onClick={() => setText("")}>New</Button>
       </div>
-      <Fieldset label="オプション">
-        <Checkbox checked={wrap} onChange={() => setWrap(!wrap)} value="wrap" label="ワードラップ" />
-        <Checkbox checked={true} value="status" label="ステータスバー" />
+      <Fieldset label="Options">
+        <Checkbox checked={wrap} onChange={() => setWrap(!wrap)} value="wrap" label="Word Wrap" />
+        <Checkbox checked={true} value="status" label="Status Bar" />
       </Fieldset>
       <Area value={text} onChange={(e) => setText(e.target.value)} style={{ whiteSpace: wrap ? "pre-wrap" : "pre", overflowX: wrap ? "hidden" : "auto" }} />
-      <div style={{ fontSize: 11, color: "#555" }}>文字数: {text.length} | 行: {text.split("\n").length}</div>
+      <div style={{ fontSize: 11, color: "#555" }}>Characters: {text.length} | Lines: {text.split("\n").length}</div>
     </div>
   );
 }

@@ -73,16 +73,16 @@ export function ChatApp() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%" }}>
-      <Fieldset label="Wenge チャット - Vercel + Turso + Pusher">
+      <Fieldset label="Wenge Chat - Vercel + Turso + Pusher">
         <div style={{ fontSize: 10, lineHeight: 1.4, color: "#333" }}>
-          送信 → Vercel API → Turso保存 + Pusher通知 → 全クライアントへ配信
+          Send → Vercel API → Turso save + Pusher notify → Broadcast to all clients
           <br />
-          環境変数: <code>TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, PUSHER_APP_ID, PUSHER_KEY, PUSHER_SECRET, PUSHER_CLUSTER</code>
+          Env vars: <code>TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, PUSHER_APP_ID, PUSHER_KEY, PUSHER_SECRET, PUSHER_CLUSTER</code>
         </div>
       </Fieldset>
       <div style={{ display: "flex", gap: 8 }}>
-        <TextInput value={user} onChange={(e) => setUser(e.target.value)} placeholder="名前" width={120} />
-        <span style={{ fontSize: 11, alignSelf: "center" }}>として参加中</span>
+        <TextInput value={user} onChange={(e) => setUser(e.target.value)} placeholder="Name" width={120} />
+        <span style={{ fontSize: 11, alignSelf: "center" }}>online</span>
       </div>
       <div
         ref={listRef}
@@ -97,7 +97,7 @@ export function ChatApp() {
         }}
       >
         {messages.length === 0 ? (
-          <div style={{ color: "#888", textAlign: "center", marginTop: 40 }}>メッセージがありません。最初のメッセージを送ろう！</div>
+          <div style={{ color: "#888", textAlign: "center", marginTop: 40 }}>No messages yet. Be the first!</div>
         ) : (
           messages.map((m) => (
             <div key={m.id} style={{ marginBottom: 4 }}>
@@ -109,8 +109,8 @@ export function ChatApp() {
         )}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
-        <TextInput value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="メッセージを入力..." style={{ flex: 1 }} />
-        <Button onClick={send}>送信</Button>
+        <TextInput value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Type a message..." style={{ flex: 1 }} />
+        <Button onClick={send}>Send</Button>
       </div>
     </div>
   );

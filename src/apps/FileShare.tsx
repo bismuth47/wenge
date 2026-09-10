@@ -62,33 +62,33 @@ export function FileShareApp() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <Fieldset label="Cloudflare R2 ファイル共有">
+      <Fieldset label="Cloudflare R2 File Share">
         <div style={{ fontSize: 11, color: "#333", marginBottom: 8 }}>
-          Vercel API → Cloudflare R2 に保存。Presigned URL 方式でも直接アップロードでも動作します。
+          Saved via Vercel API → Cloudflare R2. Works with presigned URLs or direct upload.
           <br />
-          環境変数: <code>R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET</code>
+          Env vars: <code>R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET</code>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Button as="span">ファイルを選択</Button>
+            <Button as="span">Choose File</Button>
             <input type="file" onChange={onUpload} style={{ display: "none" }} />
           </label>
-          <TextInput placeholder="prefixで絞り込み" value={prefix} onChange={(e) => setPrefix(e.target.value)} width={160} />
-          <Button onClick={fetchFiles}>更新</Button>
+          <TextInput placeholder="Filter by prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} width={160} />
+          <Button onClick={fetchFiles}>Refresh</Button>
         </div>
         {uploading && <ProgressBar value={progress} style={{ marginTop: 8 }} />}
       </Fieldset>
 
       <div style={{ border: "2px inset #fff", background: "#fff", minHeight: 140, maxHeight: 220, overflow: "auto" }}>
         {files.length === 0 ? (
-          <div style={{ padding: 20, textAlign: "center", color: "#888", fontSize: 12 }}>ファイルがありません。アップロードしてください。</div>
+          <div style={{ padding: 20, textAlign: "center", color: "#888", fontSize: 12 }}>No files. Please upload.</div>
         ) : (
           <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#000080", color: "#fff" }}>
-                <th style={{ textAlign: "left", padding: 4 }}>ファイル名</th>
-                <th>サイズ</th>
-                <th>更新日</th>
+                <th style={{ textAlign: "left", padding: 4 }}>File name</th>
+                <th>Size</th>
+                <th>Date Modified</th>
                 <th></th>
               </tr>
             </thead>
@@ -114,7 +114,7 @@ export function FileShareApp() {
                   <td style={{ textAlign: "center", fontSize: 10 }}>{new Date(f.uploadedAt).toLocaleString()}</td>
                   <td style={{ textAlign: "center" }}>
                     <Button size="sm" onClick={() => window.open(f.url, "_blank")}>
-                      開く
+                      Open
                     </Button>
                   </td>
                 </tr>
@@ -123,7 +123,7 @@ export function FileShareApp() {
           </table>
         )}
       </div>
-      <div style={{ fontSize: 11 }}>{files.length} 個のオブジェクト | R2 Bucket: {import.meta.env.VITE_R2_BUCKET ?? "wenge-files"} </div>
+      <div style={{ fontSize: 11 }}>{files.length} object(s) | R2 Bucket: {import.meta.env.VITE_R2_BUCKET ?? "wenge-files"} </div>
     </div>
   );
 }

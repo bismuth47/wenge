@@ -145,19 +145,19 @@ const StartMenuWrap = styled.div`
 
 // --- App definitions ---
 const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w: number; h: number; component: React.ReactNode }> = {
-  "my-computer": { title: "マイ コンピュータ", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer, w: 420, h: 340, component: <MyComputerApp /> },
-  recycle: { title: "ごみ箱", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle, w: 400, h: 300, component: <RecycleBinApp /> },
-  notepad: { title: "メモ帳", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad, w: 480, h: 360, component: <NotepadApp /> },
+  "my-computer": { title: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer, w: 420, h: 340, component: <MyComputerApp /> },
+  recycle: { title: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle, w: 400, h: 300, component: <RecycleBinApp /> },
+  notepad: { title: "Notepad", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad, w: 480, h: 360, component: <NotepadApp /> },
   ie: { title: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie, w: 540, h: 420, component: <InternetExplorerApp /> },
-  "file-share": { title: "ファイル共有", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare, w: 520, h: 400, component: <FileShareApp /> },
-  chat: { title: "Wenge チャット", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat, w: 420, h: 440, component: <ChatApp /> },
-  about: { title: "Wenge について", icon: ICON_FALLBACK.about, iconSrc: ICONS.about, w: 380, h: 340, component: <AboutWengeApp /> },
-  control: { title: "コントロール パネル", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel, w: 460, h: 380, component: <ControlPanelApp /> },
-  minesweeper: { title: "マインスイーパ", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper, w: 340, h: 380, component: <MinesweeperApp /> },
-  paint: { title: "ペイント", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
-  calc: { title: "電卓", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
-  explorer: { title: "エクスプローラ", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 520, h: 360, component: <ExplorerApp /> },
-  run: { title: "ファイル名を指定して実行", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 360, h: 180, component: <RunApp /> },
+  "file-share": { title: "File Share", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare, w: 520, h: 400, component: <FileShareApp /> },
+  chat: { title: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat, w: 420, h: 440, component: <ChatApp /> },
+  about: { title: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about, w: 380, h: 340, component: <AboutWengeApp /> },
+  control: { title: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel, w: 460, h: 380, component: <ControlPanelApp /> },
+  minesweeper: { title: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper, w: 340, h: 380, component: <MinesweeperApp /> },
+  paint: { title: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
+  calc: { title: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
+  explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 520, h: 360, component: <ExplorerApp /> },
+  run: { title: "Run", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 360, h: 180, component: <RunApp /> },
 };
 
 function PaintApp() {
@@ -181,12 +181,12 @@ function PaintApp() {
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-        <span style={{ fontSize: 11 }}>線: {size}px</span>
+        <span style={{ fontSize: 11 }}>Width: {size}px</span>
         <div style={{ width: 80 }}><Slider value={size} min={1} max={12} onChange={(e: any) => setSize(Number(e.target.value))} /></div>
         <Button size="sm" onClick={() => {
           const ctx = canvasRef.current?.getContext("2d");
           if (ctx && canvasRef.current) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); }
-        }}>クリア</Button>
+        }}>Clear</Button>
       </div>
       <canvas
         ref={canvasRef}
@@ -254,29 +254,29 @@ function CalcApp() {
 function ExplorerApp() {
   const [path, setPath] = useState("C:\\Wenge\\Documents");
   const files = [
-    { name: "README.txt", size: "2 KB", type: "テキスト" },
-    { name: "Wenge.bmp", size: "256 KB", type: "ビットマップ" },
-    { name: "Setup.exe", size: "1.2 MB", type: "アプリケーション" },
-    { name: "Documents", size: "", type: "フォルダ" },
+    { name: "README.txt", size: "2 KB", type: "Text" },
+    { name: "Wenge.bmp", size: "256 KB", type: "Bitmap" },
+    { name: "Setup.exe", size: "1.2 MB", type: "Application" },
+    { name: "Documents", size: "", type: "Folder" },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        <span style={{ fontSize: 11 }}>場所:</span>
+        <span style={{ fontSize: 11 }}>Location:</span>
         <TextInput value={path} onChange={(e) => setPath(e.target.value)} style={{ flex: 1 }} />
-        <Button size="sm">移動</Button>
+        <Button size="sm">Go</Button>
       </div>
       <div style={{ display: "flex", gap: 6, height: 200 }}>
         <Frame variant="well" style={{ width: 120, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> デスクトップ</div>
-          <div style={{ paddingLeft: 12, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.myComputer} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> マイ コンピュータ</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> Desktop</div>
+          <div style={{ paddingLeft: 12, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.myComputer} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> My Computer</div>
           <div style={{ paddingLeft: 12, background: "#000080", color: "#fff", display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderOpen} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {path.split("\\").pop()}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.recycle} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ごみ箱</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileShare} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ネットワーク</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.recycle} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> Recycle Bin</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileShare} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> Network</div>
         </Frame>
         <Frame variant="well" style={{ flex: 1, background: "#fff", padding: 0, overflow: "auto" }}>
           <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-            <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>名前</th><th>サイズ</th><th>種類</th></tr></thead>
+            <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
             <tbody>
               {files.map(f => <tr key={f.name} style={{ borderTop: "1px solid #c0c0c0" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{f.size}</td><td style={{ textAlign: "center" }}>{f.type}</td></tr>)}
             </tbody>
@@ -295,18 +295,18 @@ function RunApp({ onClose }: { onClose?: () => void }) {
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
         <img src={ICONS.run} alt="" width={32} height={32} style={{ imageRendering: "pixelated" as const, flexShrink: 0 }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
         <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-          プログラム名、フォルダ、ドキュメント、またはインターネット リソースを入力してください。<br />
-          Wenge によって開かれます。
+          Type the name of a program, folder, document, or Internet resource,<br />
+          and Wenge will open it for you.
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 11, width: 70 }}>名前:</span>
-        <TextInput value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="例: notepad, calc, mspaint" style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, width: 70 }}>Name:</span>
+        <TextInput value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="e.g.: notepad, calc, mspaint" style={{ flex: 1 }} />
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-        <Button onClick={() => { alert(`実行: ${cmd || "(空)"}`); onClose?.(); }}>OK</Button>
-        <Button onClick={onClose}>キャンセル</Button>
-        <Button>参照...</Button>
+        <Button onClick={() => { alert(`Run: ${cmd || "(empty)"}`); onClose?.(); }}>OK</Button>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button>Browse...</Button>
       </div>
     </div>
   );
@@ -316,34 +316,34 @@ function DemoControls() {
   const [checked, setChecked] = useState(true);
   const [radio, setRadio] = useState("a");
   const [slider, setSlider] = useState(40);
-  const [text, setText] = useState("サンプル");
+  const [text, setText] = useState("Sample");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Fieldset label="レトロ UI パーツ">
+      <Fieldset label="Retro UI Parts">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <Button>標準</Button>
-          <Button disabled>無効</Button>
-          <Button active>押下</Button>
+          <Button>Default</Button>
+          <Button disabled>Disabled</Button>
+          <Button active>Pressed</Button>
         </div>
         <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
-          <Checkbox checked={checked} onChange={() => setChecked(!checked)} value="cb1" label="チェックボックス" />
-          <Radio checked={radio === "a"} onChange={() => setRadio("a")} value="a" label="オプション A" name="demo" />
-          <Radio checked={radio === "b"} onChange={() => setRadio("b")} value="b" label="オプション B" name="demo" />
+          <Checkbox checked={checked} onChange={() => setChecked(!checked)} value="cb1" label="Checkbox" />
+          <Radio checked={radio === "a"} onChange={() => setRadio("a")} value="a" label="Option A" name="demo" />
+          <Radio checked={radio === "b"} onChange={() => setRadio("b")} value="b" label="Option B" name="demo" />
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
-          <TextInput value={text} onChange={(e) => setText(e.target.value)} placeholder="テキスト入力" width={140} />
+          <TextInput value={text} onChange={(e) => setText(e.target.value)} placeholder="Text input" width={140} />
           <div style={{ width: 100 }}><Slider value={slider} onChange={(e: any) => setSlider(Number(e.target.value))} min={0} max={100} /></div>
           <span style={{ fontSize: 11 }}>{slider}%</span>
         </div>
         <ProgressBar value={slider} style={{ marginTop: 8 }} />
       </Fieldset>
-      <GroupBox label="追加要素">
-        <div style={{ fontSize: 11 }}>GroupBox / Fieldset / Frame / Separator などを再現</div>
+      <GroupBox label="Additional">
+        <div style={{ fontSize: 11 }}>Demonstrates GroupBox / Fieldset / Frame / Separator</div>
         <Separator style={{ margin: "8px 0" }} />
         <div style={{ display: "flex", gap: 6 }}>
-          <Button size="sm">小</Button>
-          <Button size="sm">中</Button>
-          <Button size="sm">大</Button>
+          <Button size="sm">Small</Button>
+          <Button size="sm">Medium</Button>
+          <Button size="sm">Large</Button>
         </div>
       </GroupBox>
     </div>
@@ -439,18 +439,18 @@ export default function App() {
     setWindows((p) => p.map((win) => (win.id === id ? { ...win, w: nw, h: nh } : win)));
 
   const desktopIcons: { id: AppId; label: string; icon: string; iconSrc: string }[] = [
-    { id: "my-computer", label: "マイ コンピュータ", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
-    { id: "explorer", label: "エクスプローラ", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
-    { id: "recycle", label: "ごみ箱", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
-    { id: "notepad", label: "メモ帳", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad },
-    { id: "paint", label: "ペイント", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint },
-    { id: "calc", label: "電卓", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc },
+    { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
+    { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
+    { id: "recycle", label: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
+    { id: "notepad", label: "Notepad", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad },
+    { id: "paint", label: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint },
+    { id: "calc", label: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc },
     { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
-    { id: "file-share", label: "ファイル共有", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare },
-    { id: "chat", label: "Wenge チャット", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
-    { id: "control", label: "コントロールパネル", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel },
-    { id: "minesweeper", label: "マインスイーパ", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper },
-    { id: "about", label: "Wenge について", icon: ICON_FALLBACK.about, iconSrc: ICONS.about },
+    { id: "file-share", label: "File Share", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare },
+    { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
+    { id: "control", label: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel },
+    { id: "minesweeper", label: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper },
+    { id: "about", label: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about },
   ];
 
   return (
@@ -497,7 +497,7 @@ export default function App() {
             />
             <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.run}</IconFallback>
           </div>
-          <IconLabel>ファイル名を指定して実行</IconLabel>
+          <IconLabel>Run</IconLabel>
         </Icon>
       </Icons>
 
@@ -581,31 +581,31 @@ export default function App() {
                 <div style={{ flex: 1 }}>
                   <MenuListItem onClick={() => { openWindow("my-computer"); setStartOpen(false); }}>
                     <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    プログラム
+                    Programs
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }}>
                     <img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    ドキュメント
+                    Documents
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }}>
                     <img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    設定
+                    Settings
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("file-share"); setStartOpen(false); }}>
                     <img src={ICONS.fileShare} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    検索
+                    Find
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("chat"); setStartOpen(false); }}>
                     <img src={ICONS.chat} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    ヘルプ
+                    Help
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("run"); setStartOpen(false); }}>
                     <img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    ファイル名を指定して実行...
+                    Run...
                   </MenuListItem>
                   <Separator />
-                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><span style={{ marginRight: 8 }}>💥</span>ブルースクリーン</MenuListItem>
-                  <MenuListItem onClick={() => { if (confirm("Wenge を終了しますか？")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }}><span style={{ marginRight: 8 }}>⏻</span>終了...</MenuListItem>
+                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><span style={{ marginRight: 8 }}>💥</span>Blue Screen</MenuListItem>
+                  <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }}><span style={{ marginRight: 8 }}>⏻</span>Shut Down...</MenuListItem>
                 </div>
               </div>
             </MenuList>
@@ -622,7 +622,7 @@ export default function App() {
               active={startOpen}
               style={{ fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}
             >
-              <span style={{ fontSize: 14 }}>▦</span> スタート
+              <span style={{ fontSize: 14 }}>▦</span> Start
             </Button>
             <Separator orientation="vertical" size="24px" style={{ margin: "0 4px" }} />
             <div style={{ display: "flex", gap: 2, flexWrap: "nowrap", overflow: "hidden" }}>
@@ -656,7 +656,7 @@ export default function App() {
           </div>
           <Frame variant="well" style={{ padding: "2px 6px", display: "flex", alignItems: "center", gap: 8, minWidth: 90, justifyContent: "flex-end" }}>
             <span style={{ fontSize: 10 }}>🔊</span>
-            <span style={{ fontSize: 11 }}>{clock.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</span>
+            <span style={{ fontSize: 11 }}>{clock.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
           </Frame>
         </Toolbar>
       </Taskbar>

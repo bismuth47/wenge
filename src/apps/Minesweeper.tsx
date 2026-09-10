@@ -65,8 +65,8 @@ export function MinesweeperApp() {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <Button onClick={() => { setBoard(createBoard()); setGameOver(false); }}>新規ゲーム</Button>
-        <span style={{ fontSize: 11 }}>{gameOver ? "💥 ゲームオーバー" : "🚩 右クリックで旗"}</span>
+        <Button onClick={() => { setBoard(createBoard()); setGameOver(false); }}>New Game</Button>
+        <span style={{ fontSize: 11 }}>{gameOver ? "💥 Game Over" : "🚩 Right-click to flag"}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${SIZE}, 28px)`, gap: 2, background: "#c0c0c0", padding: 6, border: "2px inset #fff" }}>
         {board.map((row, y) =>

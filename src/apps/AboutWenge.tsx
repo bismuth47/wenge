@@ -15,20 +15,20 @@ export function AboutWengeApp() {
       <Logo>Wenge 95</Logo>
       <div style={{ fontSize: 11, marginTop: 4 }}>Version 4.00.950 - Wenge OS</div>
       <Separator style={{ margin: "12px 0" }} />
-      <Fieldset label="ようこそ">
+      <Fieldset label="Welcome">
         <p style={{ fontSize: 12, lineHeight: 1.7, textAlign: "left" }}>
-          <b>Wenge</b> は Windows 95 へのオマージュとして React + react95 で構築されたデスクトップ OS モックです。
+          <b>Wenge</b> is a Windows 95 homage desktop OS mock built with React + react95.
           <br />
-          ティール背景 (#008080)、MS Sans Serif、タスクバー、スタートメニュー、ドラッグ&リサイズ対応ウィンドウを完全再現。
+          Fully recreates the teal background (#008080), MS Sans Serif, taskbar, Start menu, and draggable/resizable windows.
           <br />
-          サウンドは本物の Windows 95 WAV を使用しています。
+          Sounds use authentic Windows 95 WAV files.
         </p>
       </Fieldset>
       <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "center" }}>
         <Button onClick={() => window.open("https://github.com/react95-io/React95", "_blank")}>React95</Button>
-        <Button onClick={() => alert("Wenge OS\n© 1995-2026 Wenge Corp.")}>ライセンス</Button>
+        <Button onClick={() => alert("Wenge OS\n© 1995-2026 Wenge Corp.")}>License</Button>
       </div>
-      <div style={{ marginTop: 12, fontSize: 10, color: "#555" }}>この製品は Microsoft Windows 95 にインスパイアされています</div>
+      <div style={{ marginTop: 12, fontSize: 10, color: "#555" }}>This product is inspired by Microsoft Windows 95</div>
     </div>
   );
 }
