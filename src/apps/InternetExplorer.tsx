@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar, Anchor } from "react95";
+import { ICONS } from "../assets/icons";
 
 export function InternetExplorerApp() {
   const [url, setUrl] = useState("http://www.wenge.co.jp/");
@@ -28,7 +29,10 @@ export function InternetExplorerApp() {
       {loading && <ProgressBar value={60} />}
       <Fieldset label="Wenge Internet Explorer">
         <div style={{ background: "#fff", border: "2px inset", padding: 12, minHeight: 180 }}>
-          <h3 style={{ margin: "0 0 8px", color: "#000080" }}>🌐 Wenge ネットワークへようこそ！</h3>
+          <h3 style={{ margin: "0 0 8px", color: "#000080", display: "flex", alignItems: "center", gap: 6 }}>
+            <img src={ICONS.ie} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+            Wenge ネットワークへようこそ！
+          </h3>
           <p style={{ fontSize: 12, lineHeight: 1.6 }}>
             このブラウザは Windows 95 時代の Netscape / IE3 を再現しています。
             <br />

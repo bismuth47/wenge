@@ -1,4 +1,5 @@
 import { Button, Fieldset, ProgressBar, Select } from "react95";
+import { ICONS } from "../assets/icons";
 
 export function MyComputerApp() {
   return (
@@ -6,12 +7,24 @@ export function MyComputerApp() {
       <Fieldset label="ドライブ">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
           {[
-            { label: "C: (Wenge)", icon: "💾", free: 78 },
-            { label: "A: フロッピー", icon: "💿", free: 32 },
-            { label: "D: CD-ROM", icon: "📀", free: 0 },
+            { label: "C: (Wenge)", iconSrc: ICONS.hardDrive, fallback: "💾", free: 78 },
+            { label: "A: フロッピー", iconSrc: ICONS.floppy, fallback: "💿", free: 32 },
+            { label: "D: CD-ROM", iconSrc: ICONS.cd, fallback: "📀", free: 0 },
           ].map((d) => (
             <div key={d.label} style={{ textAlign: "center", width: 90 }}>
-              <div style={{ fontSize: 32 }}>{d.icon}</div>
+              <img
+                src={d.iconSrc}
+                alt={d.label}
+                width={32}
+                height={32}
+                style={{ imageRendering: "pixelated" as const }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                  if (fb) fb.style.display = "block";
+                }}
+              />
+              <div style={{ display: "none", fontSize: 32 }}>{d.fallback}</div>
               <div style={{ fontSize: 11 }}>{d.label}</div>
               <ProgressBar value={d.free} style={{ height: 8, marginTop: 4 }} />
               <div style={{ fontSize: 10 }}>{d.free}% 空き</div>

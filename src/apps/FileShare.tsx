@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
+import { ICONS, ICON_FALLBACK } from "../assets/icons";
 
 type FileItem = { key: string; url: string; size: number; uploadedAt: string };
 
@@ -94,7 +95,21 @@ export function FileShareApp() {
             <tbody>
               {files.map((f) => (
                 <tr key={f.key} style={{ borderBottom: "1px solid #c0c0c0" }}>
-                  <td style={{ padding: 4, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {f.key}</td>
+                  <td style={{ padding: 4, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                    <img
+                      src={ICONS.fileWindows}
+                      alt=""
+                      width={16}
+                      height={16}
+                      style={{ imageRendering: "pixelated" as const, flexShrink: 0 }}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                        const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                        if (fb) fb.style.display = "inline";
+                      }}
+                    />
+                    <span style={{ display: "none" }}>{ICON_FALLBACK.fileWindows}</span> {f.key}
+                  </td>
                   <td style={{ textAlign: "center" }}>{(f.size / 1024).toFixed(1)} KB</td>
                   <td style={{ textAlign: "center", fontSize: 10 }}>{new Date(f.uploadedAt).toLocaleString()}</td>
                   <td style={{ textAlign: "center" }}>

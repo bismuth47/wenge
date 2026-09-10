@@ -28,6 +28,7 @@ import { FileShareApp } from "./apps/FileShare";
 import { ChatApp } from "./apps/ChatApp";
 import { ControlPanelApp } from "./apps/ControlPanel";
 import { MinesweeperApp } from "./apps/Minesweeper";
+import { ICONS, ICON_FALLBACK } from "./assets/icons";
 
 // --- Types ---
 type AppId =
@@ -49,6 +50,7 @@ type WinState = {
   id: AppId;
   title: string;
   icon: string;
+  iconSrc: string;
   isOpen: boolean;
   isMinimized: boolean;
   isMaximized: boolean;
@@ -98,7 +100,17 @@ const Icon = styled.div<{ $selected?: boolean }>`
   }
 `;
 
-const IconImg = styled.div`
+const IconImg = styled.img`
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.6));
+  object-fit: contain;
+  flex-shrink: 0;
+`;
+
+const IconFallback = styled.span`
   font-size: 28px;
   width: 32px;
   height: 32px;
@@ -132,20 +144,20 @@ const StartMenuWrap = styled.div`
 `;
 
 // --- App definitions ---
-const APP_DEFS: Record<AppId, { title: string; icon: string; w: number; h: number; component: React.ReactNode }> = {
-  "my-computer": { title: "マイ コンピュータ", icon: "💻", w: 420, h: 340, component: <MyComputerApp /> },
-  recycle: { title: "ごみ箱", icon: "🗑️", w: 400, h: 300, component: <RecycleBinApp /> },
-  notepad: { title: "メモ帳", icon: "📝", w: 480, h: 360, component: <NotepadApp /> },
-  ie: { title: "Internet Explorer", icon: "🌐", w: 540, h: 420, component: <InternetExplorerApp /> },
-  "file-share": { title: "ファイル共有", icon: "📁", w: 520, h: 400, component: <FileShareApp /> },
-  chat: { title: "Wenge チャット", icon: "💬", w: 420, h: 440, component: <ChatApp /> },
-  about: { title: "Wenge について", icon: "ℹ️", w: 380, h: 340, component: <AboutWengeApp /> },
-  control: { title: "コントロール パネル", icon: "⚙️", w: 460, h: 380, component: <ControlPanelApp /> },
-  minesweeper: { title: "マインスイーパ", icon: "💣", w: 340, h: 380, component: <MinesweeperApp /> },
-  paint: { title: "ペイント", icon: "🎨", w: 500, h: 380, component: <PaintApp /> },
-  calc: { title: "電卓", icon: "🧮", w: 220, h: 300, component: <CalcApp /> },
-  explorer: { title: "エクスプローラ", icon: "📂", w: 520, h: 360, component: <ExplorerApp /> },
-  run: { title: "ファイル名を指定して実行", icon: "▶️", w: 360, h: 180, component: <RunApp /> },
+const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w: number; h: number; component: React.ReactNode }> = {
+  "my-computer": { title: "マイ コンピュータ", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer, w: 420, h: 340, component: <MyComputerApp /> },
+  recycle: { title: "ごみ箱", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle, w: 400, h: 300, component: <RecycleBinApp /> },
+  notepad: { title: "メモ帳", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad, w: 480, h: 360, component: <NotepadApp /> },
+  ie: { title: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie, w: 540, h: 420, component: <InternetExplorerApp /> },
+  "file-share": { title: "ファイル共有", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare, w: 520, h: 400, component: <FileShareApp /> },
+  chat: { title: "Wenge チャット", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat, w: 420, h: 440, component: <ChatApp /> },
+  about: { title: "Wenge について", icon: ICON_FALLBACK.about, iconSrc: ICONS.about, w: 380, h: 340, component: <AboutWengeApp /> },
+  control: { title: "コントロール パネル", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel, w: 460, h: 380, component: <ControlPanelApp /> },
+  minesweeper: { title: "マインスイーパ", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper, w: 340, h: 380, component: <MinesweeperApp /> },
+  paint: { title: "ペイント", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
+  calc: { title: "電卓", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
+  explorer: { title: "エクスプローラ", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 520, h: 360, component: <ExplorerApp /> },
+  run: { title: "ファイル名を指定して実行", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 360, h: 180, component: <RunApp /> },
 };
 
 function PaintApp() {
@@ -256,17 +268,17 @@ function ExplorerApp() {
       </div>
       <div style={{ display: "flex", gap: 6, height: 200 }}>
         <Frame variant="well" style={{ width: 120, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
-          <div>📁 デスクトップ</div>
-          <div style={{ paddingLeft: 12 }}>💻 マイ コンピュータ</div>
-          <div style={{ paddingLeft: 12, background: "#000080", color: "#fff" }}>📂 {path.split("\\").pop()}</div>
-          <div>🗑 ごみ箱</div>
-          <div>🌐 ネットワーク</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> デスクトップ</div>
+          <div style={{ paddingLeft: 12, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.myComputer} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> マイ コンピュータ</div>
+          <div style={{ paddingLeft: 12, background: "#000080", color: "#fff", display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderOpen} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {path.split("\\").pop()}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.recycle} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ごみ箱</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileShare} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ネットワーク</div>
         </Frame>
         <Frame variant="well" style={{ flex: 1, background: "#fff", padding: 0, overflow: "auto" }}>
           <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
             <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>名前</th><th>サイズ</th><th>種類</th></tr></thead>
             <tbody>
-              {files.map(f => <tr key={f.name} style={{ borderTop: "1px solid #c0c0c0" }}><td style={{ padding: 3 }}>📄 {f.name}</td><td style={{ textAlign: "center" }}>{f.size}</td><td style={{ textAlign: "center" }}>{f.type}</td></tr>)}
+              {files.map(f => <tr key={f.name} style={{ borderTop: "1px solid #c0c0c0" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{f.size}</td><td style={{ textAlign: "center" }}>{f.type}</td></tr>)}
             </tbody>
           </table>
         </Frame>
@@ -281,7 +293,7 @@ function RunApp({ onClose }: { onClose?: () => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <div style={{ fontSize: 28 }}>▶️</div>
+        <img src={ICONS.run} alt="" width={32} height={32} style={{ imageRendering: "pixelated" as const, flexShrink: 0 }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
         <div style={{ fontSize: 11, lineHeight: 1.5 }}>
           プログラム名、フォルダ、ドキュメント、またはインターネット リソースを入力してください。<br />
           Wenge によって開かれます。
@@ -353,6 +365,7 @@ export default function App() {
       id,
       title: APP_DEFS[id].title,
       icon: APP_DEFS[id].icon,
+      iconSrc: APP_DEFS[id].iconSrc,
       isOpen: id === "about" || id === "notepad", // initial open for demo
       isMinimized: false,
       isMaximized: false,
@@ -394,7 +407,7 @@ export default function App() {
       const def = APP_DEFS[id];
       return [
         ...prev,
-        { id, title: def.title, icon: def.icon, isOpen: true, isMinimized: false, isMaximized: false, x: 60 + Math.random() * 80, y: 40 + Math.random() * 60, w: def.w, h: def.h, z: maxZ.current },
+        { id, title: def.title, icon: def.icon, iconSrc: def.iconSrc, isOpen: true, isMinimized: false, isMaximized: false, x: 60 + Math.random() * 80, y: 40 + Math.random() * 60, w: def.w, h: def.h, z: maxZ.current },
       ];
     });
   };
@@ -425,19 +438,19 @@ export default function App() {
   const updateSize = (id: AppId, nw: number, nh: number) =>
     setWindows((p) => p.map((win) => (win.id === id ? { ...win, w: nw, h: nh } : win)));
 
-  const desktopIcons: { id: AppId; label: string; icon: string }[] = [
-    { id: "my-computer", label: "マイ コンピュータ", icon: "💻" },
-    { id: "explorer", label: "エクスプローラ", icon: "📂" },
-    { id: "recycle", label: "ごみ箱", icon: "🗑️" },
-    { id: "notepad", label: "メモ帳", icon: "📝" },
-    { id: "paint", label: "ペイント", icon: "🎨" },
-    { id: "calc", label: "電卓", icon: "🧮" },
-    { id: "ie", label: "Internet Explorer", icon: "🌐" },
-    { id: "file-share", label: "ファイル共有", icon: "📁" },
-    { id: "chat", label: "Wenge チャット", icon: "💬" },
-    { id: "control", label: "コントロールパネル", icon: "⚙️" },
-    { id: "minesweeper", label: "マインスイーパ", icon: "💣" },
-    { id: "about", label: "Wenge について", icon: "ℹ️" },
+  const desktopIcons: { id: AppId; label: string; icon: string; iconSrc: string }[] = [
+    { id: "my-computer", label: "マイ コンピュータ", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
+    { id: "explorer", label: "エクスプローラ", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
+    { id: "recycle", label: "ごみ箱", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
+    { id: "notepad", label: "メモ帳", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad },
+    { id: "paint", label: "ペイント", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint },
+    { id: "calc", label: "電卓", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc },
+    { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
+    { id: "file-share", label: "ファイル共有", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare },
+    { id: "chat", label: "Wenge チャット", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
+    { id: "control", label: "コントロールパネル", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel },
+    { id: "minesweeper", label: "マインスイーパ", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper },
+    { id: "about", label: "Wenge について", icon: ICON_FALLBACK.about, iconSrc: ICONS.about },
   ];
 
   return (
@@ -451,7 +464,18 @@ export default function App() {
             onClick={(e) => { e.stopPropagation(); setSelectedIcon(ic.id); playChord(); }}
             onDoubleClick={(e) => { e.stopPropagation(); openWindow(ic.id); }}
           >
-            <IconImg>{ic.icon}</IconImg>
+            <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
+              <IconImg
+                src={ic.iconSrc}
+                alt={ic.label}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                  if (fb) fb.style.display = "grid";
+                }}
+              />
+              <IconFallback style={{ display: "none" }}>{ic.icon}</IconFallback>
+            </div>
             <IconLabel>{ic.label}</IconLabel>
           </Icon>
         ))}
@@ -461,7 +485,18 @@ export default function App() {
           onClick={(e) => { e.stopPropagation(); setSelectedIcon("run"); }}
           onDoubleClick={(e) => { e.stopPropagation(); openWindow("run"); }}
         >
-          <IconImg>▶️</IconImg>
+          <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
+            <IconImg
+              src={ICONS.run}
+              alt="run"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+                const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                if (fb) fb.style.display = "grid";
+              }}
+            />
+            <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.run}</IconFallback>
+          </div>
           <IconLabel>ファイル名を指定して実行</IconLabel>
         </Icon>
       </Icons>
@@ -489,6 +524,7 @@ export default function App() {
             key={w.id}
             title={w.title}
             icon={w.icon}
+            iconSrc={w.iconSrc}
             x={w.x}
             y={w.y}
             width={w.w}
@@ -543,12 +579,30 @@ export default function App() {
                   Wenge95
                 </div>
                 <div style={{ flex: 1 }}>
-                  <MenuListItem onClick={() => { openWindow("my-computer"); setStartOpen(false); }}><span style={{ marginRight: 8 }}>💻</span>プログラム</MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }}><span style={{ marginRight: 8 }}>📂</span>ドキュメント</MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }}><span style={{ marginRight: 8 }}>⚙️</span>設定</MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("file-share"); setStartOpen(false); }}><span style={{ marginRight: 8 }}>🔍</span>検索</MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("chat"); setStartOpen(false); }}><span style={{ marginRight: 8 }}>💬</span>ヘルプ</MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("run"); setStartOpen(false); }}><span style={{ marginRight: 8 }}>▶️</span>ファイル名を指定して実行...</MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("my-computer"); setStartOpen(false); }}>
+                    <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    プログラム
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }}>
+                    <img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    ドキュメント
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }}>
+                    <img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    設定
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("file-share"); setStartOpen(false); }}>
+                    <img src={ICONS.fileShare} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    検索
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("chat"); setStartOpen(false); }}>
+                    <img src={ICONS.chat} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    ヘルプ
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("run"); setStartOpen(false); }}>
+                    <img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    ファイル名を指定して実行...
+                  </MenuListItem>
                   <Separator />
                   <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><span style={{ marginRight: 8 }}>💥</span>ブルースクリーン</MenuListItem>
                   <MenuListItem onClick={() => { if (confirm("Wenge を終了しますか？")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }}><span style={{ marginRight: 8 }}>⏻</span>終了...</MenuListItem>
@@ -582,7 +636,20 @@ export default function App() {
                   }}
                   style={{ minWidth: 120, maxWidth: 150, justifyContent: "flex-start", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 >
-                  <span style={{ marginRight: 6 }}>{w.icon}</span>{w.title}
+                  <img
+                    src={w.iconSrc}
+                    alt=""
+                    width={16}
+                    height={16}
+                    style={{ marginRight: 6, imageRendering: "pixelated" as const, flexShrink: 0 }}
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                      const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                      if (fb) fb.style.display = "inline";
+                    }}
+                  />
+                  <span style={{ display: "none", marginRight: 6 }}>{w.icon}</span>
+                  {w.title}
                 </Button>
               ))}
             </div>
