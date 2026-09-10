@@ -35,15 +35,9 @@ export function ControlPanelApp() {
           <span style={{ fontSize: 12 }}>{volume}%</span>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <Checkbox checked value="startup">
-            起動音
-          </Checkbox>
-          <Checkbox checked value="chord">
-            操作音
-          </Checkbox>
-          <Checkbox checked={false} value="mute">
-            消音
-          </Checkbox>
+          <Checkbox checked value="startup" label="起動音" />
+          <Checkbox checked value="chord" label="操作音" />
+          <Checkbox checked={false} value="mute" label="消音" />
         </div>
       </Fieldset>
 

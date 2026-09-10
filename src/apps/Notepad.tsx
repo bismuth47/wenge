@@ -25,10 +25,8 @@ export function NotepadApp() {
         <Button onClick={() => setText("")}>新規</Button>
       </div>
       <Fieldset label="オプション">
-        <Checkbox checked={wrap} onChange={() => setWrap(!wrap)} value="wrap">
-          ワードラップ
-        </Checkbox>
-        <Checkbox checked={true} value="status">ステータスバー</Checkbox>
+        <Checkbox checked={wrap} onChange={() => setWrap(!wrap)} value="wrap" label="ワードラップ" />
+        <Checkbox checked={true} value="status" label="ステータスバー" />
       </Fieldset>
       <Area value={text} onChange={(e) => setText(e.target.value)} style={{ whiteSpace: wrap ? "pre-wrap" : "pre", overflowX: wrap ? "hidden" : "auto" }} />
       <div style={{ fontSize: 11, color: "#555" }}>文字数: {text.length} | 行: {text.split("\n").length}</div>
