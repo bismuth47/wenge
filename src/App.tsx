@@ -799,12 +799,12 @@ export default function App() {
             // clamp
             nx=Math.max(0, Math.min(nx, rect.width - ICON_W));
             ny=Math.max(0, Math.min(ny, rect.height - ICON_H));
-            // snap to grid
-            nx=Math.round(nx/GRID_W)*GRID_W + 4;
-            ny=Math.round(ny/GRID_H)*GRID_H + 4;
+            // snap to grid (origin 12 to match getDefaultPos)
+            nx=Math.round((nx - 12)/GRID_W)*GRID_W + 12;
+            ny=Math.round((ny - 12)/GRID_H)*GRID_H + 12;
             // second clamp after snap
-            nx=Math.max(4, Math.min(nx, rect.width - ICON_W -4));
-            ny=Math.max(4, Math.min(ny, rect.height - ICON_H -4));
+            nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
+            ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
             n[k]={x:nx,y:ny};
           });
         }
@@ -862,8 +862,10 @@ export default function App() {
             let ny=orig.y + deltaY;
             nx=Math.max(0, Math.min(nx, rect.width - ICON_W));
             ny=Math.max(0, Math.min(ny, rect.height - ICON_H));
-            nx=Math.round(nx/GRID_W)*GRID_W + 4;
-            ny=Math.round(ny/GRID_H)*GRID_H + 4;
+            nx=Math.round((nx - 12)/GRID_W)*GRID_W + 12;
+            ny=Math.round((ny - 12)/GRID_H)*GRID_H + 12;
+            nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
+            ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
             n[k]={x:nx,y:ny};
           });
         }
