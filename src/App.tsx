@@ -926,6 +926,43 @@ export default function App() {
             ny=Math.round((ny - 12)/GRID_H)*GRID_H + 12;
             nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
             ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
+            // collision detection: check if this position overlaps with any other icon
+            const otherIcons = Object.keys(n).filter(id => id !== k && id !== "run");
+            for (const otherId of otherIcons) {
+              const otherPos = n[otherId];
+              if (otherPos && Math.abs(otherPos.x - nx) < ICON_W && Math.abs(otherPos.y - ny) < ICON_H) {
+                // Find nearest available grid position
+                let found = false;
+                for (let radius = 1; radius <= 5 && !found; radius++) {
+                  for (let dx = -radius; dx <= radius && !found; dx++) {
+                    for (let dy = -radius; dy <= radius && !found; dy++) {
+                      if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+                      const tryX = nx + dx * GRID_W;
+                      const tryY = ny + dy * GRID_H;
+                      if (tryX < 12 || tryY < 12 || tryX > rect.width - ICON_W - 12 || tryY > rect.height - ICON_H - 12) continue;
+                      let collision = false;
+                      for (const checkId of otherIcons) {
+                        const checkPos = n[checkId];
+                        if (checkPos && Math.abs(checkPos.x - tryX) < ICON_W && Math.abs(checkPos.y - tryY) < ICON_H) {
+                          collision = true;
+                          break;
+                        }
+                      }
+                      if (!collision) {
+                        nx = tryX;
+                        ny = tryY;
+                        found = true;
+                      }
+                    }
+                  }
+                }
+                if (!found) {
+                  nx = orig.x;
+                  ny = orig.y;
+                }
+                break;
+              }
+            }
             n[k]={x:nx,y:ny};
           });
         }
