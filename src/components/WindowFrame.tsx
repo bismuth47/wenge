@@ -155,24 +155,24 @@ export function WindowFrame({
   return (
     <StyledWindow data-window $x={x} $y={y} $w={width} $h={height} $z={zIndex} $maximized={!!maximized} onMouseDown={onFocus}>
       <Header active={!!active} onMouseDown={handleHeaderMouseDown}>
-        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {iconSrc ? (
-            <img
-              src={iconSrc}
-              alt=""
-              width={16}
-              height={16}
-              style={{ imageRendering: "pixelated" as const, flexShrink: 0 }}
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-                const fallback = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                if (fallback) fallback.style.display = "inline";
-              }}
-            />
-          ) : null}
-          {icon && <span style={{ display: iconSrc ? "none" : "inline" }}>{icon}</span>}
-          <span>{title}</span>
-        </span>
+<span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            {iconSrc ? (
+              <img
+                src={iconSrc}
+                alt=""
+                width={16}
+                height={16}
+                style={{ imageRendering: "pixelated" as const, flexShrink: 0 }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  const fallback = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                  if (fallback) fallback.style.display = "inline";
+                }}
+              />
+            ) : null}
+            {icon && <span style={{ display: iconSrc ? "none" : "inline", flexShrink: 0 }}>{icon}</span>}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{title}</span>
+          </span>
         <Controls>
           <Button square size="sm" onClick={onMinimize}>
             <span style={{ fontWeight: "bold" }}>_</span>
