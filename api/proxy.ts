@@ -147,11 +147,16 @@ export default async function handler(req: any, res: any) {
     const contentType = upstream.headers.get("content-type") || "text/html";
     const isHtml = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 
-    // Strip framing headers, add CORS
+    // Strip framing headers, add CORS + COOP/COEP permissive
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("X-Frame-Options", "ALLOWALL");
     // Explicitly remove CSP that would block; we set permissive
     res.setHeader("Content-Security-Policy", "frame-ancestors *");
+    res.setHeader("Cross-Origin-Opener-Policy", "unsafe-none");
+    res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.removeHeader?.("Cross-Origin-Opener-Policy-Report-Only");
+    res.removeHeader?.("Cross-Origin-Embedder-Policy-Report-Only");
 
     if (!isHtml) {
       // For non-HTML (images, etc.) stream bytes
@@ -171,24 +176,26 @@ export default async function handler(req: any, res: any) {
       html = html.slice(0, 3 * 1024 * 1024);
     }
 
-    // Inject <base href> for relative URL resolution
+    // --- HTML sanitization for iframe embedding (no full-proxy) ---
+    // 1) Remove meta http-equiv CSP / X-Frame-Options that would re-block inside frame
+    html = html.replace(/<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, "");
+    html = html.replace(/<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi, "");
+
+    // 2) Inject <base href> for relative URL resolution (subresources remain direct via base)
     const baseHref = upstream.url || target;
     const baseTag = `<base href="${baseHref}">`;
-    // Also inject a small script to force links/forms to stay inside proxy? Optional
-    // We inject base tag into <head>
+    // Anti frame-busting script: neutralize top/parent checks without breaking page
+    const antiBustScript = `<script>try{window.top=window.self;window.parent=window.self;Object.defineProperty(window,'top',{get:()=>window.self,configurable:true});Object.defineProperty(window,'parent',{get:()=>window.self,configurable:true});}catch(e){}</script>`;
     if (/<head[^>]*>/i.test(html)) {
-      html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${baseTag}`);
+      html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${baseTag}\n${antiBustScript}`);
     } else if (/<html[^>]*>/i.test(html)) {
-      html = html.replace(/<html[^>]*>/i, (m) => `${m}\n<head>${baseTag}</head>`);
+      html = html.replace(/<html[^>]*>/i, (m) => `${m}\n<head>${baseTag}\n${antiBustScript}</head>`);
     } else {
-      html = `${baseTag}\n${html}`;
+      html = `${baseTag}\n${antiBustScript}\n${html}`;
     }
 
-    // Remove existing X-Frame-Options meta if any (defense)
-    // Not strictly needed but we ensure no meta CSP blocks
-    // We also add a style to ensure body margin
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    // Cache for 60s at CDN
+    // Cache for 60s at CDN (HTML only)
     res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
 
     return res.status(200).send(html);
