@@ -50,11 +50,11 @@ export function SoundRecorderApp(){
           <span style={{ fontFamily:"monospace", fontSize:14 }}>{String(Math.floor(secs/60)).padStart(2,"0")}:{String(secs%60).padStart(2,"0")}</span>
           <span style={{ fontSize:11, color:"#808080" }}>{recording?"Recording...":hasAudio?"Ready": "Idle"}</span>
         </div>
-        <div style={{ display:"flex", gap:6, width:"100%", justifyContent:"center" }}>
-          {!recording ? <Button onClick={startRec} size="sm">● Record</Button> : <Button onClick={stopRec} size="sm">■ Stop</Button>}
-          <Button size="sm" disabled={!hasAudio||recording} onClick={play}>{playing?"Playing...":"▶ Play"}</Button>
-          <Button size="sm" disabled={!hasAudio} onClick={save}>Save As...</Button>
-        </div>
+        <div style={{ display:"flex", gap:6, width:"100%", justifyContent:"center", flexWrap:"nowrap" }}>
+            {!recording ? <Button onClick={startRec} size="sm" style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>● Record</Button> : <Button onClick={stopRec} size="sm" style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>■ Stop</Button>}
+            <Button size="sm" disabled={!hasAudio||recording} onClick={play} style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>{playing?"Playing...":"▶ Play"}</Button>
+            <Button size="sm" disabled={!hasAudio} onClick={save} style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}>Save As...</Button>
+          </div>
         <div style={{ width:"100%", height:40, background:"#000", border:"2px inset #fff", display:"flex", alignItems:"center", justifyContent:"center", gap:1 }}>
           {Array.from({length:30}).map((_,i)=> <div key={i} style={{ width:2, height: recording? 6+Math.random()*20 : hasAudio? 8+Math.sin(i+secs)*6 : 4, background: recording?"#00ff00": hasAudio?"#ffff00":"#003300" }} /> )}
         </div>
