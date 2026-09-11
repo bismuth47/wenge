@@ -512,7 +512,7 @@ export default function App() {
       title: APP_DEFS[id].title,
       icon: APP_DEFS[id].icon,
       iconSrc: APP_DEFS[id].iconSrc,
-      isOpen: id === "about" || id === "notepad",
+      isOpen: false,
       isMinimized: false,
       isMaximized: false,
       x: 80 + (idx % 4) * 28,
