@@ -29,17 +29,23 @@ function isProbablyUrl(input: string): boolean {
   if (!s) return false;
   if (/^https?:\/\//i.test(s)) return true;
   if (/\s/.test(s)) return false; // 空白含む→検索ワード
-  // localhost や IP はURL扱い（ドットなしでもURL）
   if (/^localhost(:\d+)?(\/|$)/i.test(s)) return true;
   if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/|$)/.test(s)) return true;
-  if (!s.includes(".")) return false; // ドット無し→検索ワード
-  // ドット含み空白無し→URLとみなす (example.com, foo.co.jp/bar)
+  if (!s.includes(".")) return false;
   return /^[^\s]+\.[^\s]+/.test(s);
 }
 
 function toDuckDuckGoUrl(query: string): string {
   return `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query.trim())}`;
 }
+function toBingUrl(query: string): string {
+  return `https://www.bing.com/search?q=${encodeURIComponent(query.trim())}`;
+}
+function toWikipediaUrl(query: string): string {
+  return `https://ja.wikipedia.org/w/index.php?search=${encodeURIComponent(query.trim())}&ns0=1`;
+}
+
+type BlockInfo = { query: string; code: string | null; email: string | null; originalUrl: string };
 
 export function InternetExplorerApp() {
   const [address, setAddress] = useState(DEFAULT_URL);
@@ -52,6 +58,8 @@ export function InternetExplorerApp() {
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("DuckDuckGo (プロキシ経由)");
   const [probeInfo, setProbeInfo] = useState<string | null>(null);
+  const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const probeAbortRef = useRef<AbortController | null>(null);
@@ -67,7 +75,6 @@ export function InternetExplorerApp() {
     : "about:blank";
 
   const doProbe = useCallback(async (targetUrl: string) => {
-    // cancel previous probe
     probeAbortRef.current?.abort();
     const ac = new AbortController();
     probeAbortRef.current = ac;
@@ -76,10 +83,7 @@ export function InternetExplorerApp() {
       const res = await fetch(`/api/proxy?probe=1&url=${encodeURIComponent(targetUrl)}`, {
         signal: ac.signal,
       });
-      if (!res.ok) {
-        // probe endpoint may not exist in dev (Vite without vercel dev) -> treat as not blocked
-        return false;
-      }
+      if (!res.ok) return false;
       const data = await res.json().catch(() => null);
       if (!data) return false;
       if (data.blocked) {
@@ -94,6 +98,35 @@ export function InternetExplorerApp() {
     }
   }, []);
 
+  // Check proxy response for DDG bot block before committing iframe
+  const checkDdgBlocked = useCallback(async (proxyUrl: string): Promise<{ blocked: boolean; code: string | null; email: string | null }> => {
+    try {
+      const res = await fetch(proxyUrl);
+      // Proxy returns 502 JSON when blocked
+      if (res.status === 502) {
+        const j = await res.json().catch(() => null);
+        if (j?.botBlocked) return { blocked: true, code: j.code || null, email: j.email || null };
+      }
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const j = await res.json().catch(() => null);
+        if (j?.botBlocked) return { blocked: true, code: j.code || null, email: j.email || null };
+      }
+      // If HTML but contains block markers (fallback when proxy didn't catch)
+      if (ct.includes("text/html")) {
+        const t = await res.text();
+        const low = t.toLowerCase();
+        if (low.includes("if this persists") && low.includes("anonymized")) {
+          const m = t.match(/error-lite\+[^\s"'<]+/i);
+          return { blocked: true, code: m ? m[0] : "anonymized", email: null };
+        }
+      }
+      return { blocked: false, code: null, email: null };
+    } catch {
+      return { blocked: false, code: null, email: null };
+    }
+  }, []);
+
   const navigateTo = useCallback(
     async (raw: string, opts?: { replaceHistory?: boolean; forceProxy?: boolean }) => {
       const trimmed = raw.trim();
@@ -103,9 +136,9 @@ export function InternetExplorerApp() {
         return;
       }
 
-      // URLか検索ワードか判定。検索ワードなら DuckDuckGo HTML版 URLを生成
       let targetUrl: string;
       let forceProxyForThisNav = opts?.forceProxy ?? false;
+      let searchQuery: string | null = null;
       if (isProbablyUrl(trimmed)) {
         const normalized = normalizeUrl(trimmed);
         if (!normalized) {
@@ -115,22 +148,23 @@ export function InternetExplorerApp() {
         }
         targetUrl = normalized;
       } else {
+        searchQuery = trimmed;
         targetUrl = toDuckDuckGoUrl(trimmed);
-        forceProxyForThisNav = true; // DuckDuckGoはプロキシ経由で確実に表示
+        forceProxyForThisNav = true;
       }
 
       setError(null);
+      setDdgBlocked(null);
+      setFallbackNotice(null);
       setStatusText(`Opening ${targetUrl}...`);
       setLoading(true);
 
-      // history handling - use ref to avoid stale closure
       const curIdx = hIndexRef.current;
       if (!opts?.replaceHistory) {
         setHistoryStack((prev) => {
           const truncated = prev.slice(0, curIdx + 1);
           if (truncated[truncated.length - 1] === targetUrl) return prev;
           const next = [...truncated, targetUrl];
-          // update index to point to new entry
           setHIndex(next.length - 1);
           return next;
         });
@@ -142,38 +176,60 @@ export function InternetExplorerApp() {
         });
       }
 
+      // For DDG search, pre-check proxy for bot block and stay inside window
+      if (searchQuery) {
+        const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+        const check = await checkDdgBlocked(proxyUrl);
+        if (check.blocked) {
+          // Win95窓内でフォールバック: Bingで代替表示、DDGはバナーで通知
+          const bingUrl = toBingUrl(searchQuery);
+          setDdgBlocked({ query: searchQuery, code: check.code, email: check.email, originalUrl: targetUrl });
+          setFallbackNotice(`DuckDuckGoが一時的にブロックされました (code: ${check.code || "anonymized"})。Bingで代替表示します。`);
+          setStatusText(`DDGブロック → Bingフォールバック: ${searchQuery}`);
+          setCurrentUrl(bingUrl);
+          setAddress(bingUrl);
+          setUseProxy(true);
+          setLoading(false);
+          // push fallback history as well
+          setHistoryStack((prev) => {
+            const next = [...prev, bingUrl];
+            setHIndex(next.length - 1);
+            return next;
+          });
+          return;
+        }
+        // Not blocked: proceed to DDG
+        setCurrentUrl(targetUrl);
+        setAddress(targetUrl);
+        setUseProxy(true);
+        setStatusText(`DuckDuckGoで検索(プロキシ経由): ${searchQuery}`);
+        setLoading(false);
+        return;
+      }
+
       setCurrentUrl(targetUrl);
       setAddress(targetUrl);
 
       if (forceProxyForThisNav) {
         setUseProxy(true);
-        // DDGは初回からプロキシなのでprobe不要。statusも明示
-        if (!isProbablyUrl(trimmed)) {
-          setStatusText(`DuckDuckGoで検索(プロキシ経由): ${trimmed}`);
-        }
+        setLoading(false);
         return;
       }
 
-      // Auto probe: if blocked, switch to proxy
       setUseProxy(false);
       const shouldProxy = await doProbe(targetUrl);
       if (shouldProxy) {
         setUseProxy(true);
         setStatusText(`互換表示(プロキシ経由)で開いています: ${targetUrl}`);
       }
+      setLoading(false);
     },
-    [doProbe],
+    [doProbe, checkDdgBlocked],
   );
 
-  // Keep hIndex in sync when historyStack changes externally (initial)
-  // Fix hIndex after history push – ensure it points to last element
   useEffect(() => {
-    if (hIndex >= historyStack.length) {
-      setHIndex(historyStack.length - 1);
-    }
-    if (hIndex < 0 && historyStack.length > 0) {
-      setHIndex(0);
-    }
+    if (hIndex >= historyStack.length) setHIndex(historyStack.length - 1);
+    if (hIndex < 0 && historyStack.length > 0) setHIndex(0);
   }, [historyStack, hIndex]);
 
   const goBack = () => {
@@ -182,14 +238,13 @@ export function InternetExplorerApp() {
     const url = historyStack[nextIdx];
     setHIndex(nextIdx);
     setError(null);
+    setDdgBlocked(null);
+    setFallbackNotice(null);
     setStatusText(`Opening ${url}...`);
     setLoading(true);
     setCurrentUrl(url);
     setAddress(url);
-    // probe for back navigation as well
-    doProbe(url).then((blocked) => {
-      setUseProxy(blocked);
-    });
+    doProbe(url).then((blocked) => setUseProxy(blocked)).finally(() => setLoading(false));
   };
 
   const goForward = () => {
@@ -198,31 +253,26 @@ export function InternetExplorerApp() {
     const url = historyStack[nextIdx];
     setHIndex(nextIdx);
     setError(null);
+    setDdgBlocked(null);
+    setFallbackNotice(null);
     setStatusText(`Opening ${url}...`);
     setLoading(true);
     setCurrentUrl(url);
     setAddress(url);
-    doProbe(url).then((blocked) => {
-      setUseProxy(blocked);
-    });
+    doProbe(url).then((blocked) => setUseProxy(blocked)).finally(() => setLoading(false));
   };
 
   const handleRefresh = () => {
     if (!currentUrl) return;
     setError(null);
+    setDdgBlocked(null);
+    setFallbackNotice(null);
     setLoading(true);
     setStatusText(`Refreshing ${currentUrl}...`);
-    // Force iframe reload by resetting src via key or re-setting useProxy
-    // Do fresh probe as headers may have changed
     doProbe(currentUrl).then((blocked) => {
       if (blocked && !useProxy) setUseProxy(true);
-      else if (!blocked && useProxy) {
-        // keep proxy if user manually enabled; otherwise stay direct
-        // We keep current useProxy to avoid flicker
-      }
-      // Trigger reload by briefly clearing and resetting iframe src
-      // Instead, we change iframe key by appending timestamp via state
       setReloadKey((k) => k + 1);
+      setLoading(false);
     });
   };
 
@@ -231,32 +281,42 @@ export function InternetExplorerApp() {
   const handleStop = () => {
     setLoading(false);
     setStatusText("Navigation stopped");
-    // Try to stop iframe loading
     if (iframeRef.current) {
       try {
         iframeRef.current.src = "about:blank";
-        // restore after tick
         setTimeout(() => {
-          if (iframeRef.current && currentUrl) {
-            iframeRef.current.src = iframeSrc;
-          }
+          if (iframeRef.current && currentUrl) iframeRef.current.src = iframeSrc;
         }, 0);
       } catch {}
     }
   };
 
-  const handleGo = () => {
-    navigateTo(address);
-  };
-
+  const handleGo = () => navigateTo(address);
   const handleAddressKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      navigateTo(address);
-    }
+    if (e.key === "Enter") navigateTo(address);
   };
 
   const handleIframeLoad = () => {
     setLoading(false);
+    // Detect JSON bot-block rendered inside iframe (fallback for race)
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      if (doc) {
+        const txt = doc.body?.innerText || "";
+        if (txt.includes("bot blocked") || (txt.includes("If this persists") && txt.includes("anonymized"))) {
+          const q = ddgBlocked?.query || address;
+          if (q && !isProbablyUrl(q)) {
+            setDdgBlocked({ query: q, code: "anonymized", email: null, originalUrl: currentUrl });
+            const bingUrl = toBingUrl(q);
+            setFallbackNotice("DDGブロックを検出 → Bingで代替表示します（Win95窓内）。");
+            setCurrentUrl(bingUrl);
+            setAddress(bingUrl);
+            setUseProxy(true);
+            return;
+          }
+        }
+      }
+    } catch {}
     setStatusText(useProxy ? `互換表示(プロキシ経由): ${currentUrl}` : `Document done: ${currentUrl}`);
     setError(null);
   };
@@ -264,18 +324,14 @@ export function InternetExplorerApp() {
   const handleIframeError = () => {
     setLoading(false);
     if (!useProxy) {
-      // Auto switch to proxy on error
       setStatusText("表示に失敗しました。互換表示に切り替えています...");
       setUseProxy(true);
     } else {
-      setError("ページの読み込みに失敗しました。外部ブラウザで開いてみてください。");
+      setError("ページの読み込みに失敗しました。別の検索で試してください。");
       setStatusText("Error loading document");
     }
   };
 
-  // Also auto-switch to proxy if direct load seems blocked after 2.5s
-  // We use a timeout that checks if iframe content is inaccessible (cross-origin check)
-  // Cross-origin normally throws, which means it loaded. If it doesn't throw and body is empty, likely blocked.
   useEffect(() => {
     if (!currentUrl || useProxy || loading === false) return;
     const t = setTimeout(() => {
@@ -283,11 +339,9 @@ export function InternetExplorerApp() {
       if (!iframe) return;
       try {
         const doc = iframe.contentDocument;
-        // If we can access document and it's empty or contains our error page, switch to proxy
         if (doc) {
           const bodyText = doc.body?.innerText?.slice(0, 200) || "";
           const title = doc.title || "";
-          // Heuristic: blank or browser error page
           if (!bodyText && !title) {
             setUseProxy(true);
             setStatusText("直接表示がブロックされたため互換表示に切り替えました");
@@ -296,14 +350,11 @@ export function InternetExplorerApp() {
             setStatusText("直接表示がブロックされたため互換表示に切り替えました");
           }
         }
-      } catch {
-        // Cross-origin access throws -> means direct load succeeded (not blocked) -> do nothing
-      }
+      } catch {}
     }, 2500);
     return () => clearTimeout(t);
   }, [currentUrl, useProxy, loading, reloadKey]);
 
-  // Initial probe for default URL
   useEffect(() => {
     doProbe(currentUrl).then((blocked) => {
       if (blocked) setUseProxy(true);
@@ -314,133 +365,95 @@ export function InternetExplorerApp() {
   const canBack = hIndex > 0;
   const canForward = hIndex < historyStack.length - 1;
 
+  const handleFallbackBing = () => {
+    if (!ddgBlocked) return;
+    const bingUrl = toBingUrl(ddgBlocked.query);
+    setFallbackNotice(`Bingで再検索: ${ddgBlocked.query}`);
+    navigateTo(bingUrl);
+  };
+  const handleFallbackWiki = () => {
+    if (!ddgBlocked) return;
+    const wikiUrl = toWikipediaUrl(ddgBlocked.query);
+    setFallbackNotice(`Wikipediaで検索: ${ddgBlocked.query}`);
+    navigateTo(wikiUrl);
+  };
+  const handleRetryDdg = () => {
+    if (!ddgBlocked) return;
+    const q = ddgBlocked.query;
+    setDdgBlocked(null);
+    setFallbackNotice(null);
+    navigateTo(q);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
-      {/* Toolbar */}
       <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-        <Button size="sm" disabled={!canBack} onClick={goBack}>
-          ◀ Back
-        </Button>
-        <Button size="sm" disabled={!canForward} onClick={goForward}>
-          ▶ Forward
-        </Button>
-        <Button size="sm" onClick={handleRefresh} disabled={!currentUrl}>
-          Refresh
-        </Button>
-        <Button size="sm" onClick={handleStop} disabled={!loading}>
-          Stop
-        </Button>
-        <TextInput
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          onKeyDown={handleAddressKeyDown}
-          placeholder="URL または検索ワード (例: wenge / example.com)"
-          style={{ flex: 1, minWidth: 160 }}
-        />
-        <Button onClick={handleGo} disabled={loading}>
-          Go
-        </Button>
-        <Button
-          size="sm"
-          title="外部ブラウザで開く"
-          onClick={() => {
-            const trimmed = address.trim();
-            const u = trimmed
-              ? isProbablyUrl(trimmed)
-                ? normalizeUrl(trimmed) || currentUrl
-                : toDuckDuckGoUrl(trimmed)
-              : currentUrl;
-            if (u) window.open(u, "_blank", "noopener");
-          }}
-        >
-          ↗
-        </Button>
+        <Button size="sm" disabled={!canBack} onClick={goBack}>◀ Back</Button>
+        <Button size="sm" disabled={!canForward} onClick={goForward}>▶ Forward</Button>
+        <Button size="sm" onClick={handleRefresh} disabled={!currentUrl}>Refresh</Button>
+        <Button size="sm" onClick={handleStop} disabled={!loading}>Stop</Button>
+        <TextInput value={address} onChange={(e) => setAddress(e.target.value)} onKeyDown={handleAddressKeyDown} placeholder="URL または検索ワード (例: wenge / example.com)" style={{ flex: 1, minWidth: 160 }} />
+        <Button onClick={handleGo} disabled={loading}>Go</Button>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Checkbox
-          checked={useProxy}
-          onChange={() => setUseProxy((v) => !v)}
-          label="互換表示(プロキシ経由)"
-          value="proxy"
-        />
-        {probeInfo && useProxy && (
-          <span style={{ fontSize: 10, color: "#808000", background: "#ffffe1", border: "1px solid #c0c0c0", padding: "1px 4px" }}>
-            自動切替: {probeInfo}
-          </span>
-        )}
-        <span style={{ fontSize: 10, color: "#808080" }}>
-          {useProxy ? "via /api/proxy" : "direct"}
-        </span>
+        <Checkbox checked={useProxy} onChange={() => setUseProxy((v) => !v)} label="互換表示(プロキシ経由)" value="proxy" />
+        {probeInfo && useProxy && <span style={{ fontSize: 10, color: "#808000", background: "#ffffe1", border: "1px solid #c0c0c0", padding: "1px 4px" }}>自動切替: {probeInfo}</span>}
+        <span style={{ fontSize: 10, color: "#808080" }}>{useProxy ? "via /api/proxy" : "direct"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          <Button size="sm" onClick={() => window.open(currentUrl, "_blank", "noopener")}>
-            外部で開く
-          </Button>
-          <Button size="sm" onClick={() => window.open(`/api/proxy?url=${encodeURIComponent(currentUrl)}`, "_blank", "noopener")}>
-            View Source
-          </Button>
+          <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
         </div>
       </div>
 
       {loading && <ProgressBar value={60} style={{ height: 12 }} />}
 
-      {/* Quick links */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
         <span style={{ fontWeight: "bold" }}>お気に入り:</span>
         {QUICK_LINKS.map((u) => (
-          <Anchor
-            key={u}
-            onClick={() => navigateTo(u)}
-            style={{ cursor: "pointer", fontSize: 11 }}
-          >
-            {u.replace("https://", "")}
-          </Anchor>
+          <Anchor key={u} onClick={() => navigateTo(u)} style={{ cursor: "pointer", fontSize: 11 }}>{u.replace("https://", "")}</Anchor>
         ))}
-        <Anchor onClick={() => navigateTo("https://www.wenge.co.jp/")} style={{ cursor: "pointer", fontSize: 11 }}>
-          wenge.co.jp
-        </Anchor>
+        <Anchor onClick={() => navigateTo("https://www.wenge.co.jp/")} style={{ cursor: "pointer", fontSize: 11 }}>wenge.co.jp</Anchor>
       </div>
 
-      {error && (
+      {fallbackNotice && (
+        <Frame variant="well" style={{ background: "#ffffe1", padding: "6px 8px", fontSize: 11, color: "#000080", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <span>ℹ {fallbackNotice}</span>
+          <Button size="sm" onClick={() => setFallbackNotice(null)}>閉じる</Button>
+        </Frame>
+      )}
+
+      {ddgBlocked && (
+        <Frame variant="well" style={{ background: "#c0c0c0", padding: 8, display: "flex", flexDirection: "column", gap: 6, border: "2px inset #fff" }}>
+          <div style={{ fontSize: 11, fontWeight: "bold", color: "#000080", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14 }}>⚠</span> DuckDuckGo が一時的にブロックされました
+            {ddgBlocked.code && <span style={{ fontWeight: "normal", color: "#800000", fontSize: 10 }}>code: {ddgBlocked.code.slice(0, 40)}</span>}
+          </div>
+          <div style={{ fontSize: 11, color: "#000", lineHeight: 1.4, background: "#fff", border: "2px inset #fff", padding: 6 }}>
+            検索 <b>{ddgBlocked.query}</b> は DuckDuckGo 側のボット判定（<code>If this persists… anonymized</code>）でブロックされました。<br />
+            VercelのデータセンターIP/TLSが原因で、ヘッダ偽装だけでは回避できない場合があります。<br />
+            <b>Win95窓内で代替検索を表示しています。</b> 外部ブラウザには遷移しません。
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Button size="sm" onClick={handleRetryDdg}>DDGを再試行</Button>
+            <Button size="sm" onClick={handleFallbackBing}>Bingで検索（窓内）</Button>
+            <Button size="sm" onClick={handleFallbackWiki}>Wikipediaで検索（窓内）</Button>
+            <Button size="sm" onClick={() => { setDdgBlocked(null); setFallbackNotice(null); }}>閉じる</Button>
+          </div>
+          <div style={{ fontSize: 10, color: "#808080" }}>現在は Bing 結果をプロキシ経由で表示中。アドレスバーのURLは窓内で切り替え可能です。</div>
+        </Frame>
+      )}
+
+      {error && !ddgBlocked && (
         <Frame variant="well" style={{ background: "#ffffe1", padding: "6px 8px", fontSize: 11, color: "#800000", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <span>⚠ {error}</span>
           <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-            {!useProxy && (
-              <Button size="sm" onClick={() => setUseProxy(true)}>
-                互換表示で再試行
-              </Button>
-            )}
-            <Button
-              size="sm"
-              onClick={() => {
-                const trimmed = address.trim();
-                const u = trimmed
-                  ? isProbablyUrl(trimmed)
-                    ? normalizeUrl(trimmed) || currentUrl
-                    : toDuckDuckGoUrl(trimmed)
-                  : currentUrl;
-                if (u) window.open(u, "_blank", "noopener");
-              }}
-            >
-              外部で開く
-            </Button>
+            {!useProxy && <Button size="sm" onClick={() => setUseProxy(true)}>互換表示で再試行</Button>}
+            <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
           </div>
         </Frame>
       )}
 
-      {/* Iframe container */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 260,
-          background: "#fff",
-          border: "2px inset #fff",
-          padding: 2,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ flex: 1, minHeight: 260, background: "#fff", border: "2px inset #fff", padding: 2, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
           <iframe
             key={`${iframeSrc}::${reloadKey}::${useProxy ? "proxy" : "direct"}`}
@@ -454,18 +467,9 @@ export function InternetExplorerApp() {
             onError={handleIframeError}
           />
           {loading && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: "rgba(255,255,255,0.7)",
-                display: "grid",
-                placeItems: "center",
-                fontSize: 11,
-                color: "#000080",
-              }}
-            >
-              Loading {currentUrl}...
+            <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.85)", display: "grid", placeItems: "center", fontSize: 11, color: "#000080", flexDirection: "column", gap: 6 }}>
+              <div>Loading {currentUrl}...</div>
+              {ddgBlocked && <div style={{ fontSize: 10, color: "#808080" }}>DDGブロック検出時はBingに自動切替します</div>}
             </div>
           )}
         </div>
@@ -477,8 +481,7 @@ export function InternetExplorerApp() {
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}>
-        ヒント: URL（例: <code>example.com</code>）は直接開き、検索ワード（例: <code>wenge 使い方</code>）は
-        DuckDuckGo HTML版でプロキシ経由検索します。表示されない場合は自動で互換表示に切り替わります。
+        ヒント: URL（例: <code>example.com</code>）は直接開き、検索ワード（例: <code>wenge 使い方</code>）は DuckDuckGo HTML版でプロキシ経由検索。ブロック時はWin95窓内でBing/Wikipediaにフォールバックします。
       </div>
     </div>
   );

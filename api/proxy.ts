@@ -18,14 +18,9 @@ function isBlockedByHeaders(headers: Headers): boolean {
   const csp = headers.get("content-security-policy") || headers.get("content-security-policy-report-only");
   if (csp) {
     const lower = csp.toLowerCase();
-    // frame-ancestors 'none' or 'self' without our origin => blocked
     if (lower.includes("frame-ancestors")) {
-      // naive: if it contains frame-ancestors and does not allow *
       if (lower.includes("frame-ancestors 'none'") || lower.includes("frame-ancestors 'self'")) return true;
-      // if it restricts to specific origins, still blocked for iframe
       if (!lower.includes("frame-ancestors *") && !lower.includes("frame-ancestors https:")) {
-        // Check if it explicitly allows any - otherwise consider blocked
-        // For safety, treat any frame-ancestors directive as blocked unless it contains *
         const m = lower.match(/frame-ancestors([^;]+)/);
         if (m) {
           const val = m[1].trim();
@@ -65,9 +60,68 @@ function validateUrl(raw: string): { ok: boolean; url?: URL; error?: string } {
   if (isPrivateHostname(parsed.hostname)) {
     return { ok: false, error: "private address blocked" };
   }
-  // Block non-standard ports to reduce SSRF surface (allow 80,443 and 3000-9000)
-  // We allow standard ports; for now allow any but could restrict.
   return { ok: true, url: parsed };
+}
+
+const PC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+function isDuckDuckGoHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "duckduckgo.com" || h === "html.duckduckgo.com" || h === "lite.duckduckgo.com" || h.endsWith(".duckduckgo.com");
+}
+
+function buildBrowserHeaders(targetUrl: string): Record<string, string> {
+  const isDDG = (() => {
+    try { return isDuckDuckGoHostname(new URL(targetUrl).hostname); } catch { return false; }
+  })();
+  const base: Record<string, string> = {
+    "User-Agent": PC_UA,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Cache-Control": "no-cache",
+    Pragma: "no-cache",
+  };
+  if (isDDG) {
+    base["Referer"] = "https://html.duckduckgo.com/";
+    base["Sec-Fetch-Site"] = "same-origin";
+  }
+  return base;
+}
+
+function isDuckDuckGoHtmlRequest(urlStr: string): { isDDGHtml: boolean; query: string | null } {
+  try {
+    const u = new URL(urlStr);
+    if (!isDuckDuckGoHostname(u.hostname)) return { isDDGHtml: false, query: null };
+    if (!u.pathname.startsWith("/html")) return { isDDGHtml: false, query: null };
+    const q = u.searchParams.get("q");
+    return { isDDGHtml: !!q, query: q };
+  } catch {
+    return { isDDGHtml: false, query: null };
+  }
+}
+
+function isBotBlockedBody(html: string, status: number): { blocked: boolean; code: string | null } {
+  if (status === 202) return { blocked: true, code: "202" };
+  const lower = html.toLowerCase();
+  if (lower.includes("if this persists") && lower.includes("anonymized")) {
+    const m = html.match(/error-lite\+[^\s"'<]+/i);
+    return { blocked: true, code: m ? m[0] : "anonymized" };
+  }
+  if (lower.includes("bots use duckduckgo") || lower.includes("please complete the following challenge")) {
+    return { blocked: true, code: "challenge" };
+  }
+  if (lower.includes("unfortunately, bots") || lower.includes("anomaly detected")) {
+    return { blocked: true, code: "anomaly" };
+  }
+  return { blocked: false, code: null };
 }
 
 export default async function handler(req: any, res: any) {
@@ -84,34 +138,42 @@ export default async function handler(req: any, res: any) {
   }
   const target = v.url.toString();
 
-  // Probe mode: HEAD request and header inspection only
+  // Probe mode: avoid HEAD/Range for DDG (bot signal), use GET with browser headers
   if (probe) {
     try {
+      const isDDG = isDuckDuckGoHostname(v.url.hostname);
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 5000);
-      const PC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-      const headRes = await fetch(target, {
-        method: "HEAD",
-        redirect: "follow",
-        signal: controller.signal,
-        headers: {
-          "User-Agent": PC_UA,
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        },
-      }).catch(async () => {
-        // Some servers don't support HEAD, fallback to GET with range
-        const c2 = new AbortController();
-        const t2 = setTimeout(() => c2.abort(), 5000);
-        const r = await fetch(target, {
+      // DDG: use GET directly with full headers; others: try HEAD then fallback GET
+      let headRes: Response;
+      if (isDDG) {
+        const headers = buildBrowserHeaders(target);
+        headRes = await fetch(target, {
           method: "GET",
           redirect: "follow",
-          signal: c2.signal,
-          headers: { "User-Agent": PC_UA, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "ja,en-US;q=0.9,en;q=0.8", Range: "bytes=0-1023" },
+          signal: controller.signal,
+          headers: { ...headers, Range: "bytes=0-4096" },
         });
-        clearTimeout(t2);
-        return r;
-      });
+      } else {
+        const headers = buildBrowserHeaders(target);
+        headRes = await fetch(target, {
+          method: "HEAD",
+          redirect: "follow",
+          signal: controller.signal,
+          headers,
+        }).catch(async () => {
+          const c2 = new AbortController();
+          const t2 = setTimeout(() => c2.abort(), 5000);
+          const r = await fetch(target, {
+            method: "GET",
+            redirect: "follow",
+            signal: c2.signal,
+            headers: { ...headers, Range: "bytes=0-1023" },
+          });
+          clearTimeout(t2);
+          return r;
+        });
+      }
       clearTimeout(t);
       const blocked = isBlockedByHeaders(headRes.headers);
       return res.status(200).json({
@@ -123,7 +185,6 @@ export default async function handler(req: any, res: any) {
         finalUrl: headRes.url || target,
       });
     } catch (e: any) {
-      // If probe fails, assume not blocked but report error; frontend will try direct
       return res.status(200).json({ blocked: false, probeError: e?.message || String(e), finalUrl: target });
     }
   }
@@ -133,30 +194,47 @@ export default async function handler(req: any, res: any) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
-    const upstream = await fetch(target, {
+    // For DDG HTML ?q=, use POST with form body (more reliable than GET)
+    const ddg = isDuckDuckGoHtmlRequest(target);
+    let fetchUrl = target;
+    let fetchInit: RequestInit = {
       redirect: "follow",
       signal: controller.signal,
-      headers: {
-        // PC風に偽装: DuckDuckGoのBot判定「If this persists...」を回避
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-      },
-    });
-    clearTimeout(timeout);
+      headers: buildBrowserHeaders(target),
+    };
 
-    if (!upstream.ok) {
-      const text = await upstream.text().catch(() => "");
-      return res.status(upstream.status).send(text || `Upstream error ${upstream.status}`);
+    if (ddg.isDDGHtml && ddg.query) {
+      // Switch to POST https://html.duckduckgo.com/html/ with q
+      const u = new URL(target);
+      fetchUrl = `${u.protocol}//${u.host}/html/`;
+      const body = new URLSearchParams();
+      body.set("q", ddg.query);
+      // minimal form fields to look like real submission
+      body.set("b", "");
+      body.set("kl", "wt-wt");
+      const headers = buildBrowserHeaders(fetchUrl);
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      headers["Origin"] = "https://html.duckduckgo.com";
+      headers["Referer"] = "https://html.duckduckgo.com/";
+      fetchInit = {
+        redirect: "follow",
+        signal: controller.signal,
+        method: "POST",
+        headers,
+        body: body.toString(),
+      };
     }
 
+    const upstream = await fetch(fetchUrl, fetchInit as any);
+    clearTimeout(timeout);
+
+    // Check upstream status before body read - but also need body check for 200-blocked pages
     const contentType = upstream.headers.get("content-type") || "text/html";
     const isHtml = contentType.includes("text/html") || contentType.includes("application/xhtml+xml");
 
-    // Strip framing headers, add CORS + COOP/COEP permissive
+    // Strip framing headers, add CORS permissive
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("X-Frame-Options", "ALLOWALL");
-    // Explicitly remove CSP that would block; we set permissive
     res.setHeader("Content-Security-Policy", "frame-ancestors *");
     res.setHeader("Cross-Origin-Opener-Policy", "unsafe-none");
     res.setHeader("Cross-Origin-Embedder-Policy", "unsafe-none");
@@ -165,7 +243,10 @@ export default async function handler(req: any, res: any) {
     res.removeHeader?.("Cross-Origin-Embedder-Policy-Report-Only");
 
     if (!isHtml) {
-      // For non-HTML (images, etc.) stream bytes
+      if (!upstream.ok) {
+        const text = await upstream.text().catch(() => "");
+        return res.status(upstream.status).send(text || `Upstream error ${upstream.status}`);
+      }
       res.setHeader("Content-Type", contentType);
       const buf = Buffer.from(await upstream.arrayBuffer());
       if (buf.length > 3 * 1024 * 1024) {
@@ -182,15 +263,38 @@ export default async function handler(req: any, res: any) {
       html = html.slice(0, 3 * 1024 * 1024);
     }
 
-    // --- HTML sanitization for iframe embedding (no full-proxy) ---
-    // 1) Remove meta http-equiv CSP / X-Frame-Options that would re-block inside frame
+    // DDG bot-blocked page is 200/202 with challenge body -> detect and return JSON instead of HTML
+    const botCheck = isBotBlockedBody(html, upstream.status);
+    if (botCheck.blocked) {
+      res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      // Try to extract anonymized email/code for debugging
+      const emailMatch = html.match(/[a-z0-9._%+-]+\+[^@\s]+@duckduckgo\.com/i);
+      const liteMatch = html.match(/error-lite\+[^\s"'<]+/i);
+      return res.status(502).json({
+        error: "duckduckgo bot blocked",
+        botBlocked: true,
+        code: botCheck.code || liteMatch?.[0] || null,
+        email: emailMatch?.[0] || null,
+        status: upstream.status,
+        url: target,
+        fetchUrl,
+        hint: "Vercel IP/TLS blocked. Will fallback inside Win95 window (Bing/Wikipedia).",
+      });
+    }
+
+    if (!upstream.ok) {
+      // Non-bot error but HTML error page
+      res.setHeader("Cache-Control", "private, no-store");
+      return res.status(upstream.status).send(html || `Upstream error ${upstream.status}`);
+    }
+
+    // --- HTML sanitization for iframe embedding ---
     html = html.replace(/<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, "");
     html = html.replace(/<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi, "");
 
-    // 2) Inject <base href> for relative URL resolution (subresources remain direct via base)
-    const baseHref = upstream.url || target;
+    const baseHref = upstream.url || fetchUrl || target;
     const baseTag = `<base href="${baseHref}">`;
-    // Anti frame-busting script: neutralize top/parent checks without breaking page
     const antiBustScript = `<script>try{window.top=window.self;window.parent=window.self;Object.defineProperty(window,'top',{get:()=>window.self,configurable:true});Object.defineProperty(window,'parent',{get:()=>window.self,configurable:true});}catch(e){}</script>`;
     if (/<head[^>]*>/i.test(html)) {
       html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${baseTag}\n${antiBustScript}`);
@@ -201,7 +305,6 @@ export default async function handler(req: any, res: any) {
     }
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    // Cache for 60s at CDN (HTML only)
     res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
 
     return res.status(200).send(html);
