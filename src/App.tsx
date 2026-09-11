@@ -19,6 +19,7 @@ import {
 import { WindowFrame } from "./components/WindowFrame";
 import { useClock } from "./hooks/useClock";
 import { SOUNDS, useSound } from "./hooks/useSound";
+import { useAnimatedCursor, triggerBusy } from "./hooks/useAnimatedCursor";
 import { NotepadApp } from "./apps/Notepad";
 import { MyComputerApp } from "./apps/MyComputer";
 import { RecycleBinApp } from "./apps/RecycleBin";
@@ -29,6 +30,24 @@ import { ChatApp } from "./apps/ChatApp";
 import { ControlPanelApp } from "./apps/ControlPanel";
 import { MinesweeperApp } from "./apps/Minesweeper";
 import { MediaPlayerApp } from "./apps/MediaPlayer";
+import { WordPadApp } from "./apps/WordPad";
+import { MsDosApp } from "./apps/MsDos";
+import { ClockApp } from "./apps/ClockApp";
+import { CharMapApp } from "./apps/CharMap";
+import { SoundRecorderApp } from "./apps/SoundRecorder";
+import { VolumeControlApp } from "./apps/VolumeControl";
+import { SolitaireApp } from "./apps/Solitaire";
+import { FreeCellApp } from "./apps/FreeCell";
+import { HeartsApp } from "./apps/Hearts";
+import { BackupApp } from "./apps/Backup";
+import { ScanDiskApp } from "./apps/ScanDisk";
+import { SysMonApp } from "./apps/SysMon";
+import { FindApp } from "./apps/Find";
+import { HelpApp } from "./apps/Help";
+import { BriefcaseApp } from "./apps/Briefcase";
+import { DialerApp } from "./apps/Dialer";
+import { NetworkApp } from "./apps/Network";
+import { CdPlayerApp } from "./apps/CdPlayer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
 
 // --- Types ---
@@ -36,6 +55,24 @@ type AppId =
   | "my-computer"
   | "recycle"
   | "notepad"
+  | "wordpad"
+  | "msdos"
+  | "clock"
+  | "charmap"
+  | "sound-recorder"
+  | "volume"
+  | "solitaire"
+  | "freecell"
+  | "hearts"
+  | "backup"
+  | "scandisk"
+  | "sysmon"
+  | "find"
+  | "help"
+  | "briefcase"
+  | "dialer"
+  | "network"
+  | "cd-player"
   | "ie"
   | "file-share"
   | "chat"
@@ -73,37 +110,35 @@ const Desktop = styled.div`
   overflow: hidden;
   padding-bottom: 30px;
   box-sizing: border-box;
-  /* ブラウザサイズに追従 — 小さい画面でもスクロールせず収まる */
   min-width: 320px;
 `;
 
-const Icons = styled.div`
-  display: flex;
-  flex-direction: column;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 12px;
-  padding: 12px;
-  height: calc(100% - 30px);
-  width: 100%;
-  box-sizing: border-box;
-  @media (max-width: 600px) {
-    gap: 8px;
-    padding: 8px;
-  }
+// Absolute positioned icons container
+const IconsLayer = styled.div`
+  position: absolute;
+  inset: 0;
+  bottom: 30px;
+  overflow: hidden;
 `;
 
-const Icon = styled.div<{ $selected?: boolean }>`
+const Icon = styled.div<{ $selected?: boolean; $x:number; $y:number }>`
+  position: absolute;
+  left: ${(p)=>p.$x}px;
+  top: ${(p)=>p.$y}px;
   width: 80px;
+  height: 84px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  cursor: pointer;
+  cursor: url('/cursors/arrow.png') 0 0, default;
   padding: 4px;
+  box-sizing: border-box;
   background: ${(p) => (p.$selected ? "#000080" : "transparent")};
-  color: ${(p) => (p.$selected ? "#fff" : "#fff")};
+  color: #fff;
   border: 1px dotted ${(p) => (p.$selected ? "#fff" : "transparent")};
+  user-select: none;
+  touch-action: none;
   &:active {
     background: #000080;
   }
@@ -133,7 +168,33 @@ const IconLabel = styled.div`
   text-align: center;
   line-height: 1.1;
   text-shadow: 1px 1px 0 #000;
-  word-break: break-all;
+  word-break: break-word;
+  width: 100%;
+`;
+
+const SelectionRect = styled.div<{ $x:number; $y:number; $w:number; $h:number }>`
+  position: absolute;
+  left: ${(p)=>p.$x}px;
+  top: ${(p)=>p.$y}px;
+  width: ${(p)=>p.$w}px;
+  height: ${(p)=>p.$h}px;
+  border: 1px dotted #000;
+  outline: 1px dotted #fff;
+  background: rgba(0,0,128,0.12);
+  pointer-events: none;
+  z-index: 5;
+`;
+
+const ContextMenu = styled.div<{ $x:number; $y:number }>`
+  position: fixed;
+  left: ${(p)=>p.$x}px;
+  top: ${(p)=>p.$y}px;
+  z-index: 9998;
+  min-width: 180px;
+  background: #c0c0c0;
+  border: 2px outset #fff;
+  padding: 2px;
+  font-size: 11px;
 `;
 
 const Taskbar = styled(AppBar)`
@@ -145,7 +206,6 @@ const Taskbar = styled(AppBar)`
   width: 100% !important;
   height: 30px !important;
   z-index: 9999;
-  /* AppBarの2px outset borderのうち下側を消して画面端にピタッと付ける */
   border-bottom: 0 !important;
   border-right: 0 !important;
   border-left: 0 !important;
@@ -157,16 +217,34 @@ const StartMenuWrap = styled.div`
   left: 2px;
   bottom: 32px;
   z-index: 9998;
-  width: 220px;
+  width: 260px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 `;
 
 // --- App definitions ---
-// アイコン: react95にアイコンセットは無いため(v4)、本物のWin95 PNGを使用 (public/icons/*)
-// Media PlayerはWin95のmplayer/cdplayerを再現 — 本物アイコン = cd.png を流用
 const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w: number; h: number; component: React.ReactNode }> = {
   "my-computer": { title: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer, w: 420, h: 340, component: <MyComputerApp /> },
   recycle: { title: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle, w: 400, h: 300, component: <RecycleBinApp /> },
   notepad: { title: "Notepad", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad, w: 480, h: 360, component: <NotepadApp /> },
+  wordpad: { title: "WordPad", icon: ICON_FALLBACK.wordpad, iconSrc: ICONS.wordpad, w: 520, h: 380, component: <WordPadApp /> },
+  msdos: { title: "MS-DOS Prompt", icon: ICON_FALLBACK.msdos, iconSrc: ICONS.msdos, w: 520, h: 320, component: <MsDosApp /> },
+  clock: { title: "Clock", icon: ICON_FALLBACK.clock, iconSrc: ICONS.clock, w: 260, h: 300, component: <ClockApp /> },
+  charmap: { title: "Character Map", icon: ICON_FALLBACK.charmap, iconSrc: ICONS.charmap, w: 420, h: 380, component: <CharMapApp /> },
+  "sound-recorder": { title: "Sound Recorder", icon: ICON_FALLBACK.soundRecorder, iconSrc: ICONS.soundRecorder, w: 380, h: 320, component: <SoundRecorderApp /> },
+  volume: { title: "Volume Control", icon: ICON_FALLBACK.volume, iconSrc: ICONS.volume, w: 260, h: 300, component: <VolumeControlApp /> },
+  solitaire: { title: "Solitaire", icon: ICON_FALLBACK.solitaire, iconSrc: ICONS.solitaire, w: 540, h: 420, component: <SolitaireApp /> },
+  freecell: { title: "FreeCell", icon: ICON_FALLBACK.freecell, iconSrc: ICONS.freecell, w: 540, h: 420, component: <FreeCellApp /> },
+  hearts: { title: "Hearts", icon: ICON_FALLBACK.hearts, iconSrc: ICONS.hearts, w: 400, h: 460, component: <HeartsApp /> },
+  backup: { title: "Backup", icon: ICON_FALLBACK.backup, iconSrc: ICONS.backup, w: 460, h: 300, component: <BackupApp /> },
+  scandisk: { title: "ScanDisk", icon: ICON_FALLBACK.scandisk, iconSrc: ICONS.scandisk, w: 460, h: 320, component: <ScanDiskApp /> },
+  sysmon: { title: "System Monitor", icon: ICON_FALLBACK.sysmon, iconSrc: ICONS.sysmon, w: 500, h: 280, component: <SysMonApp /> },
+  find: { title: "Find", icon: ICON_FALLBACK.find, iconSrc: ICONS.find, w: 460, h: 300, component: <FindApp /> },
+  help: { title: "Help", icon: ICON_FALLBACK.help, iconSrc: ICONS.help, w: 520, h: 360, component: <HelpApp /> },
+  briefcase: { title: "Briefcase", icon: ICON_FALLBACK.briefcase, iconSrc: ICONS.briefcase, w: 460, h: 300, component: <BriefcaseApp /> },
+  dialer: { title: "Phone Dialer", icon: ICON_FALLBACK.dialer, iconSrc: ICONS.dialer, w: 280, h: 360, component: <DialerApp /> },
+  network: { title: "Network Neighborhood", icon: ICON_FALLBACK.network, iconSrc: ICONS.network, w: 460, h: 320, component: <NetworkApp /> },
+  "cd-player": { title: "CD Player", icon: ICON_FALLBACK.cdPlayer, iconSrc: ICONS.cdPlayer, w: 320, h: 260, component: <CdPlayerApp /> },
   ie: { title: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie, w: 720, h: 520, component: <InternetExplorerApp /> },
   "file-share": { title: "File Share", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare, w: 520, h: 400, component: <FileShareApp /> },
   chat: { title: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat, w: 420, h: 440, component: <ChatApp /> },
@@ -370,7 +448,21 @@ function DemoControls() {
   );
 }
 
+// --- Icon grid constants ---
+const GRID_W=96;
+const GRID_H=84;
+const ICON_W=80;
+const ICON_H=84;
+
+function getDefaultPos(index:number, _desktopW:number, desktopH:number){
+  const cols=Math.max(1, Math.floor(desktopH/GRID_H));
+  const col=Math.floor(index/cols);
+  const row=index%cols;
+  return { x: 12 + col*GRID_W, y: 12 + row*GRID_H };
+}
+
 export default function App() {
+  useAnimatedCursor();
   const clock = useClock();
   const playStartup = useSound(SOUNDS.startup, 0.4);
   const playChord = useSound(SOUNDS.chord, 0.5);
@@ -386,7 +478,7 @@ export default function App() {
       title: APP_DEFS[id].title,
       icon: APP_DEFS[id].icon,
       iconSrc: APP_DEFS[id].iconSrc,
-      isOpen: id === "about" || id === "notepad", // initial open for demo
+      isOpen: id === "about" || id === "notepad",
       isMinimized: false,
       isMaximized: false,
       x: 80 + (idx % 4) * 28,
@@ -396,11 +488,84 @@ export default function App() {
       z: idx + 1,
     }))
   );
-  const [selectedIcon, setSelectedIcon] = useState<AppId | null>(null);
+  // Icon positions with localStorage persistence
+  const desktopRef=useRef<HTMLDivElement>(null);
+  const [iconPos, setIconPos]=useState<Record<string,{x:number,y:number}>>({});
+  const [selectedIds,setSelectedIds]=useState<Set<AppId>>(new Set());
+  const [dragging,setDragging]=useState<{id:AppId, offsetX:number, offsetY:number, startX:number, startY:number, hasMoved:boolean}|null>(null);
+  const [multiDrag, setMultiDrag]=useState<Record<string,{x:number,y:number}>|null>(null);
+  const [selectionRect,setSelectionRect]=useState<{x0:number,y0:number,x1:number,y1:number}|null>(null);
+  const [contextMenu,setContextMenu]=useState<{x:number,y:number}|null>(null);
+  const longPressTimer=useRef<number|null>(null);
   const [startOpen, setStartOpen] = useState(false);
   const [showBsod, setShowBsod] = useState(false);
   const maxZ = useRef(20);
   const [startupPlayed, setStartupPlayed] = useState(false);
+
+  const desktopIcons: { id: AppId; label: string; icon: string; iconSrc: string }[] = [
+    { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
+    { id: "recycle", label: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
+    { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
+    { id: "notepad", label: "Notepad", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad },
+    { id: "wordpad", label: "WordPad", icon: ICON_FALLBACK.wordpad, iconSrc: ICONS.wordpad },
+    { id: "paint", label: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint },
+    { id: "calc", label: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc },
+    { id: "clock", label: "Clock", icon: ICON_FALLBACK.clock, iconSrc: ICONS.clock },
+    { id: "charmap", label: "Character Map", icon: ICON_FALLBACK.charmap, iconSrc: ICONS.charmap },
+    { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
+    { id: "media-player", label: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer },
+    { id: "cd-player", label: "CD Player", icon: ICON_FALLBACK.cdPlayer, iconSrc: ICONS.cdPlayer },
+    { id: "sound-recorder", label: "Sound Recorder", icon: ICON_FALLBACK.soundRecorder, iconSrc: ICONS.soundRecorder },
+    { id: "volume", label: "Volume Control", icon: ICON_FALLBACK.volume, iconSrc: ICONS.volume },
+    { id: "minesweeper", label: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper },
+    { id: "solitaire", label: "Solitaire", icon: ICON_FALLBACK.solitaire, iconSrc: ICONS.solitaire },
+    { id: "freecell", label: "FreeCell", icon: ICON_FALLBACK.freecell, iconSrc: ICONS.freecell },
+    { id: "hearts", label: "Hearts", icon: ICON_FALLBACK.hearts, iconSrc: ICONS.hearts },
+    { id: "msdos", label: "MS-DOS Prompt", icon: ICON_FALLBACK.msdos, iconSrc: ICONS.msdos },
+    { id: "find", label: "Find", icon: ICON_FALLBACK.find, iconSrc: ICONS.find },
+    { id: "help", label: "Help", icon: ICON_FALLBACK.help, iconSrc: ICONS.help },
+    { id: "briefcase", label: "Briefcase", icon: ICON_FALLBACK.briefcase, iconSrc: ICONS.briefcase },
+    { id: "dialer", label: "Phone Dialer", icon: ICON_FALLBACK.dialer, iconSrc: ICONS.dialer },
+    { id: "network", label: "Network", icon: ICON_FALLBACK.network, iconSrc: ICONS.network },
+    { id: "file-share", label: "File Share", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare },
+    { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
+    { id: "control", label: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel },
+    { id: "scandisk", label: "ScanDisk", icon: ICON_FALLBACK.scandisk, iconSrc: ICONS.scandisk },
+    { id: "backup", label: "Backup", icon: ICON_FALLBACK.backup, iconSrc: ICONS.backup },
+    { id: "sysmon", label: "System Monitor", icon: ICON_FALLBACK.sysmon, iconSrc: ICONS.sysmon },
+    { id: "about", label: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about },
+  ];
+
+  // Initialize icon positions
+  useEffect(()=>{
+    const key="wenge_icon_pos";
+    const saved=localStorage.getItem(key);
+    if(saved){
+      try{ const p=JSON.parse(saved); setIconPos(p); return; }catch{}
+    }
+    const w=window.innerWidth, h=window.innerHeight-30;
+    const pos:Record<string,{x:number,y:number}>={};
+    desktopIcons.forEach((ic,i)=> pos[ic.id]=getDefaultPos(i,w,h));
+    // Run icon separate
+    pos["run"]=getDefaultPos(desktopIcons.length,w,h);
+    setIconPos(pos);
+  },[]);
+
+  // Persist
+  useEffect(()=>{
+    if(Object.keys(iconPos).length===0) return;
+    localStorage.setItem("wenge_icon_pos", JSON.stringify(iconPos));
+  },[iconPos]);
+
+  const autoArrange=()=>{
+    const w=window.innerWidth, h=window.innerHeight-30;
+    const pos:Record<string,{x:number,y:number}>={};
+    const sorted=[...desktopIcons].sort((a,b)=> a.label.localeCompare(b.label));
+    sorted.forEach((ic,i)=> pos[ic.id]=getDefaultPos(i,w,h));
+    pos["run"]=getDefaultPos(sorted.length,w,h);
+    setIconPos(pos);
+    localStorage.setItem("wenge_icon_pos", JSON.stringify(pos));
+  };
 
   useEffect(() => {
     if (!startupPlayed) {
@@ -409,7 +574,6 @@ export default function App() {
     }
   }, [playStartup, startupPlayed]);
 
-  // レスポンシブ: ブラウザサイズ変更時にウィンドウが画面外に出ないようクランプ
   useEffect(() => {
     const clampWindows = () => {
       const vw = window.innerWidth;
@@ -430,7 +594,6 @@ export default function App() {
       );
     };
     window.addEventListener("resize", clampWindows);
-    // 初回もクランプ（小さい画面で開いた場合）
     clampWindows();
     return () => window.removeEventListener("resize", clampWindows);
   }, []);
@@ -442,6 +605,7 @@ export default function App() {
   }, [windows]);
 
   const openWindow = (id: AppId) => {
+    triggerBusy(600);
     playNav();
     setWindows((prev) => {
       const exists = prev.find((w) => w.id === id);
@@ -451,7 +615,6 @@ export default function App() {
       }
       maxZ.current += 1;
       const def = APP_DEFS[id];
-      // レスポンシブ: ビューポートより大きいウィンドウは縮小
       const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
       const vh = typeof window !== "undefined" ? window.innerHeight : 768;
       const cw = Math.min(def.w, vw - 16);
@@ -505,79 +668,263 @@ export default function App() {
       return { ...win, w: cw, h: ch };
     }));
 
-  const desktopIcons: { id: AppId; label: string; icon: string; iconSrc: string }[] = [
-    { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
-    { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
-    { id: "recycle", label: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
-    { id: "notepad", label: "Notepad", icon: ICON_FALLBACK.notepad, iconSrc: ICONS.notepad },
-    { id: "paint", label: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint },
-    { id: "calc", label: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc },
-    { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
-    { id: "file-share", label: "File Share", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare },
-    { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
-    { id: "control", label: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel },
-    { id: "minesweeper", label: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper },
-    { id: "media-player", label: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer },
-    { id: "about", label: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about },
-  ];
+  // Icon drag handlers
+  const handleIconPointerDown = (e: React.MouseEvent | React.TouchEvent, id: AppId) => {
+    const isTouch = "touches" in e;
+    const clientX = isTouch ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = isTouch ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY;
+    const pos = iconPos[id] || {x:0,y:0};
+    const rect = desktopRef.current?.getBoundingClientRect();
+    const offsetX = clientX - (rect?rect.left:0) - pos.x;
+    const offsetY = clientY - (rect?rect.top:0) - pos.y;
+
+    // Selection logic
+    const isSelected = selectedIds.has(id);
+    const isMulti = isTouch ? false : ((e as React.MouseEvent).ctrlKey || (e as React.MouseEvent).metaKey);
+    if(!isMulti && !isSelected){
+      setSelectedIds(new Set([id]));
+    } else if(isMulti){
+      setSelectedIds(prev=>{ const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); return n; });
+    } else {
+      // already selected, keep set
+      if(!isSelected) setSelectedIds(new Set([id]));
+    }
+    playChord();
+
+    if(isTouch){
+      // long press required
+      if(longPressTimer.current) window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = window.setTimeout(()=>{
+        setDragging({id, offsetX, offsetY, startX: clientX, startY: clientY, hasMoved:false});
+        if(selectedIds.has(id)){
+          const md:Record<string,{x:number,y:number}>={};
+          selectedIds.forEach(sid=>{ if(iconPos[sid]) md[sid]={...iconPos[sid]}; });
+          md[id]={...pos};
+          setMultiDrag(md);
+        } else {
+          setMultiDrag({[id]:{...pos}});
+        }
+      }, 400) as any;
+      return;
+    }
+
+    setDragging({id, offsetX, offsetY, startX: clientX, startY: clientY, hasMoved:false});
+    if(selectedIds.has(id)){
+      const md:Record<string,{x:number,y:number}>={};
+      selectedIds.forEach(sid=>{ if(iconPos[sid]) md[sid]={...iconPos[sid]}; });
+      // ensure current
+      md[id]={...pos};
+      setMultiDrag(md);
+    } else {
+      setMultiDrag({[id]:{...pos}});
+    }
+    e.stopPropagation();
+  };
+
+  const handleDesktopMouseDown = (e: React.MouseEvent) => {
+    if((e.target as HTMLElement).closest("[data-icon]")) return;
+    setSelectedIds(new Set());
+    setStartOpen(false);
+    setContextMenu(null);
+    if(e.button!==0) return;
+    const rect=desktopRef.current?.getBoundingClientRect();
+    if(!rect) return;
+    const x0=e.clientX - rect.left;
+    const y0=e.clientY - rect.top;
+    setSelectionRect({x0,y0,x1:x0,y1:y0});
+  };
+
+  const handleDesktopMouseMove = (e: React.MouseEvent) => {
+    if(dragging){
+      const rect=desktopRef.current?.getBoundingClientRect();
+      if(!rect) return;
+      const dx=e.clientX - dragging.startX;
+      const dy=e.clientY - dragging.startY;
+      if(Math.abs(dx)>3 || Math.abs(dy)>3) dragging.hasMoved=true;
+      const baseX = e.clientX - rect.left - dragging.offsetX;
+      const baseY = e.clientY - rect.top - dragging.offsetY;
+      const deltaX = baseX - (multiDrag?.[dragging.id]?.x ?? iconPos[dragging.id]?.x ?? 0);
+      const deltaY = baseY - (multiDrag?.[dragging.id]?.y ?? iconPos[dragging.id]?.y ?? 0);
+      setIconPos(prev=>{
+        const n={...prev};
+        if(multiDrag){
+          Object.keys(multiDrag).forEach(k=>{
+            const orig=multiDrag[k];
+            let nx=orig.x + deltaX;
+            let ny=orig.y + deltaY;
+            // clamp
+            nx=Math.max(0, Math.min(nx, rect.width - ICON_W));
+            ny=Math.max(0, Math.min(ny, rect.height - ICON_H));
+            // snap to grid
+            nx=Math.round(nx/GRID_W)*GRID_W + 4;
+            ny=Math.round(ny/GRID_H)*GRID_H + 4;
+            // second clamp after snap
+            nx=Math.max(4, Math.min(nx, rect.width - ICON_W -4));
+            ny=Math.max(4, Math.min(ny, rect.height - ICON_H -4));
+            n[k]={x:nx,y:ny};
+          });
+        }
+        return n;
+      });
+    }
+    if(selectionRect){
+      const rect=desktopRef.current?.getBoundingClientRect();
+      if(!rect) return;
+      const x1=e.clientX - rect.left;
+      const y1=e.clientY - rect.top;
+      const newRect={...selectionRect, x1,y1};
+      setSelectionRect(newRect);
+      // compute selection
+      const left=Math.min(newRect.x0,newRect.x1), right=Math.max(newRect.x0,newRect.x1), top=Math.min(newRect.y0,newRect.y1), bottom=Math.max(newRect.y0,newRect.y1);
+      const sel=new Set<AppId>();
+      Object.entries(iconPos).forEach(([id,pos])=>{
+        const ix=pos.x, iy=pos.y, iw=ICON_W, ih=ICON_H;
+        if(ix < right && ix+iw > left && iy < bottom && iy+ih > top) sel.add(id as AppId);
+      });
+      // also check run
+      if(iconPos["run"]){
+        const p=iconPos["run"];
+        if(p.x < right && p.x+ICON_W > left && p.y < bottom && p.y+ICON_H > top) sel.add("run" as AppId);
+      }
+      if(sel.size>0) setSelectedIds(sel);
+    }
+  };
+
+  const handleDesktopMouseUp = () => {
+    if(longPressTimer.current){ clearTimeout(longPressTimer.current); longPressTimer.current=null; }
+    if(dragging && !dragging.hasMoved){
+      // click without move already handled selection
+    }
+    setDragging(null);
+    setMultiDrag(null);
+    setSelectionRect(null);
+  };
+
+  const handleTouchMove=(e: React.TouchEvent)=>{
+    if(dragging){
+      const rect=desktopRef.current?.getBoundingClientRect();
+      if(!rect) return;
+      const t=e.touches[0];
+      const baseX=t.clientX - rect.left - dragging.offsetX;
+      const baseY=t.clientY - rect.top - dragging.offsetY;
+      const deltaX = baseX - (multiDrag?.[dragging.id]?.x ?? 0);
+      const deltaY = baseY - (multiDrag?.[dragging.id]?.y ?? 0);
+      setIconPos(prev=>{
+        const n={...prev};
+        if(multiDrag){
+          Object.keys(multiDrag).forEach(k=>{
+            const orig=multiDrag[k];
+            let nx=orig.x + deltaX;
+            let ny=orig.y + deltaY;
+            nx=Math.max(0, Math.min(nx, rect.width - ICON_W));
+            ny=Math.max(0, Math.min(ny, rect.height - ICON_H));
+            nx=Math.round(nx/GRID_W)*GRID_W + 4;
+            ny=Math.round(ny/GRID_H)*GRID_H + 4;
+            n[k]={x:nx,y:ny};
+          });
+        }
+        return n;
+      });
+      e.preventDefault();
+    }
+  };
+  const handleTouchEnd=()=>{
+    if(longPressTimer.current){ clearTimeout(longPressTimer.current); longPressTimer.current=null; }
+    setDragging(null); setMultiDrag(null);
+  };
+
+  const handleDesktopContextMenu=(e: React.MouseEvent)=>{
+    e.preventDefault();
+    setContextMenu({x:e.clientX, y:e.clientY});
+  };
 
   return (
-    <Desktop onClick={() => { setSelectedIcon(null); setStartOpen(false); }}>
-      {/* Icons */}
-      <Icons>
-        {desktopIcons.map((ic) => (
-          <Icon
-            key={ic.id}
-            $selected={selectedIcon === ic.id}
-            onClick={(e) => { e.stopPropagation(); setSelectedIcon(ic.id); playChord(); }}
-            onDoubleClick={(e) => { e.stopPropagation(); openWindow(ic.id); }}
-          >
-            <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
-              <IconImg
-                src={ic.iconSrc}
-                alt={ic.label}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                  const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                  if (fb) fb.style.display = "grid";
-                }}
-              />
-              <IconFallback style={{ display: "none" }}>{ic.icon}</IconFallback>
-            </div>
-            <IconLabel>{ic.label}</IconLabel>
-          </Icon>
-        ))}
-        {/* Demo controls standalone icon */}
-        <Icon
-          $selected={selectedIcon === "run"}
-          onClick={(e) => { e.stopPropagation(); setSelectedIcon("run"); }}
-          onDoubleClick={(e) => { e.stopPropagation(); openWindow("run"); }}
-        >
-          <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
-            <IconImg
-              src={ICONS.run}
-              alt="run"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-                const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
-                if (fb) fb.style.display = "grid";
-              }}
-            />
-            <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.run}</IconFallback>
-          </div>
-          <IconLabel>Run</IconLabel>
-        </Icon>
-      </Icons>
+    <Desktop
+      ref={desktopRef}
+      onClick={() => { setSelectedIds(new Set()); setStartOpen(false); setContextMenu(null); }}
+      onMouseDown={handleDesktopMouseDown}
+      onMouseMove={handleDesktopMouseMove}
+      onMouseUp={handleDesktopMouseUp}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onContextMenu={handleDesktopContextMenu}
+    >
+      <IconsLayer>
+        {desktopIcons.map((ic) => {
+          const pos=iconPos[ic.id] || getDefaultPos(0, window.innerWidth, window.innerHeight);
+          const selected=selectedIds.has(ic.id);
+          return (
+            <Icon
+              key={ic.id}
+              data-icon
+              $selected={selected}
+              $x={pos.x}
+              $y={pos.y}
+              onMouseDown={(e)=> handleIconPointerDown(e, ic.id)}
+              onTouchStart={(e)=> handleIconPointerDown(e, ic.id)}
+              onClick={(e) => { e.stopPropagation(); }}
+              onDoubleClick={(e) => { e.stopPropagation(); openWindow(ic.id); }}
+            >
+              <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
+                <IconImg
+                  src={ic.iconSrc}
+                  alt={ic.label}
+                  draggable={false}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                    const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                    if (fb) fb.style.display = "grid";
+                  }}
+                />
+                <IconFallback style={{ display: "none" }}>{ic.icon}</IconFallback>
+              </div>
+              <IconLabel>{ic.label}</IconLabel>
+            </Icon>
+          );
+        })}
+        {/* Run icon */}
+        {(()=>{
+          const pos=iconPos["run"] || {x:12,y:12};
+          const sel=selectedIds.has("run" as AppId);
+          return (
+            <Icon $selected={sel} $x={pos.x} $y={pos.y} data-icon
+              onMouseDown={(e)=> handleIconPointerDown(e, "run" as AppId)}
+              onTouchStart={(e)=> handleIconPointerDown(e, "run" as AppId)}
+              onClick={e=>e.stopPropagation()}
+              onDoubleClick={(e)=>{ e.stopPropagation(); openWindow("run"); }}
+            >
+              <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
+                <IconImg src={ICONS.run} alt="run" draggable={false} onError={(e)=>{ (e.currentTarget as HTMLImageElement).style.display="none"; const fb=(e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement|null; if(fb) fb.style.display="grid"; }} />
+                <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.run}</IconFallback>
+              </div>
+              <IconLabel>Run</IconLabel>
+            </Icon>
+          );
+        })()}
+        {selectionRect && (
+          <SelectionRect $x={Math.min(selectionRect.x0,selectionRect.x1)} $y={Math.min(selectionRect.y0,selectionRect.y1)} $w={Math.abs(selectionRect.x1-selectionRect.x0)} $h={Math.abs(selectionRect.y1-selectionRect.y0)} />
+        )}
+      </IconsLayer>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu $x={contextMenu.x} $y={contextMenu.y} onClick={e=>e.stopPropagation()}>
+          <MenuList style={{ width:"100%" }}>
+            <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Auto Arrange</MenuListItem>
+            <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Line up Icons</MenuListItem>
+            <Separator />
+            <MenuListItem onClick={()=>{ setContextMenu(null); location.reload(); }}>Refresh</MenuListItem>
+            <MenuListItem onClick={()=>{ setContextMenu(null); alert("Wenge 95\nProperties: 800x600, 256 colors"); }}>Properties</MenuListItem>
+          </MenuList>
+        </ContextMenu>
+      )}
 
       {/* Windows */}
       {windows.filter((w) => w.isOpen && !w.isMinimized).map((w) => {
         const def = APP_DEFS[w.id];
-        // Inject props for RunApp to close
         let comp: React.ReactNode = def.component;
         if (w.id === "recycle") comp = <RecycleBinApp playSound={playDing} />;
         if (w.id === "run") comp = <RunApp onClose={() => closeWindow("run")} />;
-        // For demo purposes, add DemoControls tab inside paint? not needed
-        // Wrap notepad with extra controls demo if needed
         if (w.id === "notepad") {
           comp = (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -612,7 +959,7 @@ export default function App() {
         );
       })}
 
-      {/* BSOD easter egg */}
+      {/* BSOD */}
       {showBsod && (
         <div
           onClick={() => setShowBsod(false)}
@@ -651,47 +998,89 @@ export default function App() {
                     <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
                     Programs ►
                   </MenuListItem>
-                  <div style={{ paddingLeft: 12, background: "#c0c0c0" }}>
-                    <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                      Media Player
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("paint"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.paint} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                      Paint
+                  <div style={{ paddingLeft: 8, background: "#c0c0c0", maxHeight:200, overflowY:"auto" }}>
+                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px" }}>Accessories</div>
+                    <MenuListItem onClick={() => { openWindow("wordpad"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.wordpad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> WordPad
                     </MenuListItem>
                     <MenuListItem onClick={() => { openWindow("notepad"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.notepad} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                      Notepad
+                      <img src={ICONS.notepad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Notepad
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("paint"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.paint} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Paint
                     </MenuListItem>
                     <MenuListItem onClick={() => { openWindow("calc"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.calc} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                      Calculator
+                      <img src={ICONS.calc} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Calculator
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("clock"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.clock} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Clock
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("charmap"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.charmap} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Character Map
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("msdos"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.msdos} alt="" width={16} height={16} style={{ marginRight: 8 }} /> MS-DOS Prompt
+                    </MenuListItem>
+                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px", marginTop:4 }}>Multimedia</div>
+                    <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Media Player
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("cd-player"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.cdPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> CD Player
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("sound-recorder"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.soundRecorder} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Sound Recorder
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("volume"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.volume} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Volume Control
+                    </MenuListItem>
+                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px", marginTop:4 }}>Games</div>
+                    <MenuListItem onClick={() => { openWindow("minesweeper"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.minesweeper} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Minesweeper
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("solitaire"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.solitaire} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Solitaire
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("freecell"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.freecell} alt="" width={16} height={16} style={{ marginRight: 8 }} /> FreeCell
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("hearts"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.hearts} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Hearts
+                    </MenuListItem>
+                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px", marginTop:4 }}>System Tools</div>
+                    <MenuListItem onClick={() => { openWindow("scandisk"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.scandisk} alt="" width={16} height={16} style={{ marginRight: 8 }} /> ScanDisk
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("backup"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.backup} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Backup
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("sysmon"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.sysmon} alt="" width={16} height={16} style={{ marginRight: 8 }} /> System Monitor
                     </MenuListItem>
                   </div>
+                  <MenuListItem onClick={() => { openWindow("help"); setStartOpen(false); }}>
+                    <img src={ICONS.help} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Help
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("find"); setStartOpen(false); }}>
+                    <img src={ICONS.find} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Find
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("briefcase"); setStartOpen(false); }}>
+                    <img src={ICONS.briefcase} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Briefcase
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("dialer"); setStartOpen(false); }}>
+                    <img src={ICONS.dialer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Phone Dialer
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("network"); setStartOpen(false); }}>
+                    <img src={ICONS.network} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Network
+                  </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }}>
-                    <img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Documents
+                    <img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Documents
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }}>
-                    <img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Settings
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); }}>
-                    <img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Media Player
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("file-share"); setStartOpen(false); }}>
-                    <img src={ICONS.fileShare} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Find
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("chat"); setStartOpen(false); }}>
-                    <img src={ICONS.chat} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Help
+                    <img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Settings
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("run"); setStartOpen(false); }}>
-                    <img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Run...
+                    <img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...
                   </MenuListItem>
                   <Separator />
                   <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><span style={{ marginRight: 8 }}>💥</span>Blue Screen</MenuListItem>
@@ -724,7 +1113,7 @@ export default function App() {
                     if (w.isMinimized || focusedId !== w.id) focusWindow(w.id);
                     else minimizeWindow(w.id);
                   }}
-                  style={{ minWidth: 120, maxWidth: 150, justifyContent: "flex-start", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  style={{ minWidth: 90, maxWidth: 130, justifyContent: "flex-start", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 >
                   <img
                     src={w.iconSrc}

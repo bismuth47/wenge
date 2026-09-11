@@ -24,7 +24,7 @@ const Header = styled(WindowHeader)`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  cursor: move;
+  cursor: url('/cursors/move.png') 16 16, move;
   user-select: none;
 `;
 
@@ -45,7 +45,7 @@ const ResizeHandle = styled.div`
   bottom: 0;
   width: 16px;
   height: 16px;
-  cursor: nwse-resize;
+  cursor: url('/cursors/size_nwse.png') 16 16, nwse-resize;
   background: transparent;
   &:after {
     content: "";
