@@ -89,11 +89,16 @@ export default async function handler(req: any, res: any) {
     try {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 5000);
+      const PC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
       const headRes = await fetch(target, {
         method: "HEAD",
         redirect: "follow",
         signal: controller.signal,
-        headers: { "User-Agent": "WengeIE/1.0" },
+        headers: {
+          "User-Agent": PC_UA,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        },
       }).catch(async () => {
         // Some servers don't support HEAD, fallback to GET with range
         const c2 = new AbortController();
@@ -102,7 +107,7 @@ export default async function handler(req: any, res: any) {
           method: "GET",
           redirect: "follow",
           signal: c2.signal,
-          headers: { "User-Agent": "WengeIE/1.0", Range: "bytes=0-1023" },
+          headers: { "User-Agent": PC_UA, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "Accept-Language": "ja,en-US;q=0.9,en;q=0.8", Range: "bytes=0-1023" },
         });
         clearTimeout(t2);
         return r;
@@ -132,7 +137,8 @@ export default async function handler(req: any, res: any) {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        "User-Agent": "WengeIE/1.0 (compatible; Wenge95)",
+        // PC風に偽装: DuckDuckGoのBot判定「If this persists...」を回避
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
       },

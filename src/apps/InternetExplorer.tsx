@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95";
 
-const DEFAULT_URL = "https://example.com";
+const DEFAULT_URL = "https://html.duckduckgo.com/html/?q=wenge";
 const QUICK_LINKS = [
+  "https://html.duckduckgo.com/html/",
   "https://example.com",
   "https://www.wikipedia.org",
   "https://neverssl.com",
-  "https://info.cern.ch",
 ];
 
 function normalizeUrl(input: string): string | null {
@@ -24,16 +24,33 @@ function normalizeUrl(input: string): string | null {
   }
 }
 
+function isProbablyUrl(input: string): boolean {
+  const s = input.trim();
+  if (!s) return false;
+  if (/^https?:\/\//i.test(s)) return true;
+  if (/\s/.test(s)) return false; // 空白含む→検索ワード
+  // localhost や IP はURL扱い（ドットなしでもURL）
+  if (/^localhost(:\d+)?(\/|$)/i.test(s)) return true;
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?(\/|$)/.test(s)) return true;
+  if (!s.includes(".")) return false; // ドット無し→検索ワード
+  // ドット含み空白無し→URLとみなす (example.com, foo.co.jp/bar)
+  return /^[^\s]+\.[^\s]+/.test(s);
+}
+
+function toDuckDuckGoUrl(query: string): string {
+  return `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query.trim())}`;
+}
+
 export function InternetExplorerApp() {
   const [address, setAddress] = useState(DEFAULT_URL);
   const [currentUrl, setCurrentUrl] = useState(DEFAULT_URL);
   const [historyStack, setHistoryStack] = useState<string[]>([DEFAULT_URL]);
   const [hIndex, setHIndex] = useState(0);
   const hIndexRef = useRef(0);
-  const [useProxy, setUseProxy] = useState(false);
+  const [useProxy, setUseProxy] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusText, setStatusText] = useState("Document done");
+  const [statusText, setStatusText] = useState("DuckDuckGo (プロキシ経由)");
   const [probeInfo, setProbeInfo] = useState<string | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -79,14 +96,31 @@ export function InternetExplorerApp() {
 
   const navigateTo = useCallback(
     async (raw: string, opts?: { replaceHistory?: boolean; forceProxy?: boolean }) => {
-      const normalized = normalizeUrl(raw);
-      if (!normalized) {
-        setError("無効なURLです。http:// または https:// で始まるURLを入力してください。");
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        setError("URLまたは検索ワードを入力してください。");
         setStatusText("Navigation canceled");
         return;
       }
+
+      // URLか検索ワードか判定。検索ワードなら DuckDuckGo HTML版 URLを生成
+      let targetUrl: string;
+      let forceProxyForThisNav = opts?.forceProxy ?? false;
+      if (isProbablyUrl(trimmed)) {
+        const normalized = normalizeUrl(trimmed);
+        if (!normalized) {
+          setError("無効なURLです。http:// または https:// で始まるURLを入力してください。");
+          setStatusText("Navigation canceled");
+          return;
+        }
+        targetUrl = normalized;
+      } else {
+        targetUrl = toDuckDuckGoUrl(trimmed);
+        forceProxyForThisNav = true; // DuckDuckGoはプロキシ経由で確実に表示
+      }
+
       setError(null);
-      setStatusText(`Opening ${normalized}...`);
+      setStatusText(`Opening ${targetUrl}...`);
       setLoading(true);
 
       // history handling - use ref to avoid stale closure
@@ -94,8 +128,8 @@ export function InternetExplorerApp() {
       if (!opts?.replaceHistory) {
         setHistoryStack((prev) => {
           const truncated = prev.slice(0, curIdx + 1);
-          if (truncated[truncated.length - 1] === normalized) return prev;
-          const next = [...truncated, normalized];
+          if (truncated[truncated.length - 1] === targetUrl) return prev;
+          const next = [...truncated, targetUrl];
           // update index to point to new entry
           setHIndex(next.length - 1);
           return next;
@@ -103,25 +137,29 @@ export function InternetExplorerApp() {
       } else {
         setHistoryStack((prev) => {
           const next = [...prev];
-          next[curIdx] = normalized;
+          next[curIdx] = targetUrl;
           return next;
         });
       }
 
-      setCurrentUrl(normalized);
-      setAddress(normalized);
+      setCurrentUrl(targetUrl);
+      setAddress(targetUrl);
 
-      if (opts?.forceProxy) {
+      if (forceProxyForThisNav) {
         setUseProxy(true);
+        // DDGは初回からプロキシなのでprobe不要。statusも明示
+        if (!isProbablyUrl(trimmed)) {
+          setStatusText(`DuckDuckGoで検索(プロキシ経由): ${trimmed}`);
+        }
         return;
       }
 
       // Auto probe: if blocked, switch to proxy
       setUseProxy(false);
-      const shouldProxy = await doProbe(normalized);
+      const shouldProxy = await doProbe(targetUrl);
       if (shouldProxy) {
         setUseProxy(true);
-        setStatusText(`互換表示(プロキシ経由)で開いています: ${normalized}`);
+        setStatusText(`互換表示(プロキシ経由)で開いています: ${targetUrl}`);
       }
     },
     [doProbe],
@@ -296,7 +334,7 @@ export function InternetExplorerApp() {
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           onKeyDown={handleAddressKeyDown}
-          placeholder="https://example.com"
+          placeholder="URL または検索ワード (例: wenge / example.com)"
           style={{ flex: 1, minWidth: 160 }}
         />
         <Button onClick={handleGo} disabled={loading}>
@@ -306,7 +344,12 @@ export function InternetExplorerApp() {
           size="sm"
           title="外部ブラウザで開く"
           onClick={() => {
-            const u = normalizeUrl(address) || currentUrl;
+            const trimmed = address.trim();
+            const u = trimmed
+              ? isProbablyUrl(trimmed)
+                ? normalizeUrl(trimmed) || currentUrl
+                : toDuckDuckGoUrl(trimmed)
+              : currentUrl;
             if (u) window.open(u, "_blank", "noopener");
           }}
         >
@@ -370,7 +413,12 @@ export function InternetExplorerApp() {
             <Button
               size="sm"
               onClick={() => {
-                const u = normalizeUrl(address) || currentUrl;
+                const trimmed = address.trim();
+                const u = trimmed
+                  ? isProbablyUrl(trimmed)
+                    ? normalizeUrl(trimmed) || currentUrl
+                    : toDuckDuckGoUrl(trimmed)
+                  : currentUrl;
                 if (u) window.open(u, "_blank", "noopener");
               }}
             >
@@ -429,7 +477,8 @@ export function InternetExplorerApp() {
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}>
-        ヒント: アドレスバーに <code>example.com</code> のように入力して Enter。表示されない場合は自動で互換表示に切り替わります。http/https のみ対応。
+        ヒント: URL（例: <code>example.com</code>）は直接開き、検索ワード（例: <code>wenge 使い方</code>）は
+        DuckDuckGo HTML版でプロキシ経由検索します。表示されない場合は自動で互換表示に切り替わります。
       </div>
     </div>
   );
