@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95";
 
-const DEFAULT_URL = "https://html.duckduckgo.com/html/?q=wenge";
+const DEFAULT_URL = "https://www.bing.com/search?q=wenge";
 const QUICK_LINKS = [
-  "https://html.duckduckgo.com/html/",
+  "https://www.bing.com/search?q=wenge",
+  "https://ja.wikipedia.org/w/index.php?search=wenge",
   "https://example.com",
   "https://www.wikipedia.org",
-  "https://neverssl.com",
 ];
 
 function normalizeUrl(input: string): string | null {
@@ -56,7 +56,7 @@ export function InternetExplorerApp() {
   const [useProxy, setUseProxy] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusText, setStatusText] = useState("DuckDuckGo (プロキシ経由)");
+  const [statusText, setStatusText] = useState("Bing (プロキシ経由)");
   const [probeInfo, setProbeInfo] = useState<string | null>(null);
   const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
@@ -149,7 +149,8 @@ export function InternetExplorerApp() {
         targetUrl = normalized;
       } else {
         searchQuery = trimmed;
-        targetUrl = toDuckDuckGoUrl(trimmed);
+        // Bingをデフォルト検索に: Vercel IPでDDG htmlは恒久202ブロックのため
+        targetUrl = toBingUrl(trimmed);
         forceProxyForThisNav = true;
       }
 
@@ -176,33 +177,12 @@ export function InternetExplorerApp() {
         });
       }
 
-      // For DDG search, pre-check proxy for bot block and stay inside window
+      // 検索ワードはBing主で窓内表示（DDG htmlはVercelで恒久202ブロックのため事前チェック不要）
       if (searchQuery) {
-        const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
-        const check = await checkDdgBlocked(proxyUrl);
-        if (check.blocked) {
-          // Win95窓内でフォールバック: Bingで代替表示、DDGはバナーで通知
-          const bingUrl = toBingUrl(searchQuery);
-          setDdgBlocked({ query: searchQuery, code: check.code, email: check.email, originalUrl: targetUrl });
-          setFallbackNotice(`DuckDuckGoが一時的にブロックされました (code: ${check.code || "anonymized"})。Bingで代替表示します。`);
-          setStatusText(`DDGブロック → Bingフォールバック: ${searchQuery}`);
-          setCurrentUrl(bingUrl);
-          setAddress(bingUrl);
-          setUseProxy(true);
-          setLoading(false);
-          // push fallback history as well
-          setHistoryStack((prev) => {
-            const next = [...prev, bingUrl];
-            setHIndex(next.length - 1);
-            return next;
-          });
-          return;
-        }
-        // Not blocked: proceed to DDG
         setCurrentUrl(targetUrl);
         setAddress(targetUrl);
         setUseProxy(true);
-        setStatusText(`DuckDuckGoで検索(プロキシ経由): ${searchQuery}`);
+        setStatusText(`Bingで検索(プロキシ経由): ${searchQuery}`);
         setLoading(false);
         return;
       }
@@ -377,12 +357,22 @@ export function InternetExplorerApp() {
     setFallbackNotice(`Wikipediaで検索: ${ddgBlocked.query}`);
     navigateTo(wikiUrl);
   };
-  const handleRetryDdg = () => {
-    if (!ddgBlocked) return;
-    const q = ddgBlocked.query;
+  const handleRetryDdg = async () => {
+    const q = ddgBlocked?.query || address.trim();
+    if (!q || isProbablyUrl(q)) return;
+    // DDGを明示的に試す（失敗時はproxyが502を返し、checkで検出してBingに留まる）
+    const ddgUrl = toDuckDuckGoUrl(q);
+    const proxyUrl = `/api/proxy?url=${encodeURIComponent(ddgUrl)}`;
+    setFallbackNotice(`DDGを再試行中: ${q}...`);
+    const check = await checkDdgBlocked(proxyUrl);
+    if (check.blocked) {
+      setDdgBlocked({ query: q, code: check.code, email: check.email, originalUrl: ddgUrl });
+      setFallbackNotice(`DDGは依然ブロック中 (code: ${check.code || "anonymized"})。Bingで継続します。`);
+      return;
+    }
     setDdgBlocked(null);
-    setFallbackNotice(null);
-    navigateTo(q);
+    setFallbackNotice(`DDGで表示: ${q}`);
+    navigateTo(ddgUrl);
   };
 
   return (
@@ -481,7 +471,7 @@ export function InternetExplorerApp() {
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}>
-        ヒント: URL（例: <code>example.com</code>）は直接開き、検索ワード（例: <code>wenge 使い方</code>）は DuckDuckGo HTML版でプロキシ経由検索。ブロック時はWin95窓内でBing/Wikipediaにフォールバックします。
+        ヒント: URL（例: <code>example.com</code>）は直接開き、検索ワード（例: <code>wenge 使い方</code>）は Bingでプロキシ経由検索（窓内）。DDGがブロック中のためBingをデフォルトにしています。DDGは「再試行」で試せます。
       </div>
     </div>
   );
