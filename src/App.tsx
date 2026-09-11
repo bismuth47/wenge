@@ -212,8 +212,6 @@ const Taskbar = styled(AppBar)`
   border-right: 0 !important;
   border-left: 0 !important;
   box-sizing: border-box;
-  display: flex !important;
-  align-items: center !important;
 `;
 
 const StartButton = styled.button<{ $active?: boolean }>`
@@ -223,7 +221,7 @@ const StartButton = styled.button<{ $active?: boolean }>`
   max-height: 22px;
   margin: 0 0 0 4px;
   flex-shrink: 0;
-  align-self: center;
+  align-self: flex-start;
   background: #c0c0c0;
   border-top: 2px solid #fff;
   border-left: 2px solid #fff;
@@ -1129,8 +1127,8 @@ export default function App() {
 
       {/* Taskbar */}
       <Taskbar data-taskbar>
-        <Toolbar style={{ justifyContent: "space-between", alignItems: "center", padding: "0 4px", height: "100%", boxSizing: "border-box", flexWrap: "nowrap", minHeight: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, height: "100%", minHeight: 0 }}>
+        <Toolbar style={{ justifyContent: "space-between", alignItems: "flex-start", padding: "2px 4px 0 4px", height: "100%", boxSizing: "border-box", flexWrap: "nowrap", minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, height: "100%", minHeight: 0, paddingTop: 1 }}>
             <StartButton
               data-start-menu
               data-start-button
