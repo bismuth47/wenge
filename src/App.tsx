@@ -19,7 +19,7 @@ import {
 import { WindowFrame } from "./components/WindowFrame";
 import { useClock } from "./hooks/useClock";
 import { SOUNDS, useSound } from "./hooks/useSound";
-import { useAnimatedCursor, triggerBusy } from "./hooks/useAnimatedCursor";
+import { useAnimatedCursor } from "./hooks/useAnimatedCursor";
 import { NotepadApp } from "./apps/Notepad";
 import { MyComputerApp } from "./apps/MyComputer";
 import { RecycleBinApp } from "./apps/RecycleBin";
@@ -502,7 +502,8 @@ export default function App() {
   const playDing = useSound(SOUNDS.ding, 0.5);
   const playMinimize = useSound(SOUNDS.minimize, 0.5);
   const playRestore = useSound(SOUNDS.restore, 0.5);
-  const playNav = useSound(SOUNDS.navigation, 0.4);
+  // playNav はアプリ起動時の音を無効化したため未使用
+  // const playNav = useSound(SOUNDS.navigation, 0.4);
   const playError = useSound(SOUNDS.error, 0.5);
 
   const [windows, setWindows] = useState<WinState[]>(() =>
@@ -638,11 +639,9 @@ export default function App() {
     return open.reduce((a, b) => (a.z > b.z ? a : b)).id;
   }, [windows]);
 
-  const openWindow = (id: AppId, opts?: { silent?: boolean }) => {
-    if (!opts?.silent) {
-      triggerBusy(600);
-      playNav();
-    }
+  const openWindow = (id: AppId, _opts?: { silent?: boolean }) => {
+    // サウンド無効化: アプリ起動時の Navigation / busy カーソル音を鳴らさない
+    // if (!opts?.silent) { triggerBusy(600); playNav(); }
     setWindows((prev) => {
       const exists = prev.find((w) => w.id === id);
       if (exists) {
@@ -725,7 +724,8 @@ export default function App() {
       // already selected, keep set
       if(!isSelected) setSelectedIds(new Set([id]));
     }
-    playChord();
+    // アプリクリック時のサウンドは無効化（要望により）
+    // playChord();
 
     if(isTouch){
       // long press required
