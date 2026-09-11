@@ -722,7 +722,14 @@ export default function App() {
   };
 
   const handleDesktopMouseDown = (e: React.MouseEvent) => {
-    if((e.target as HTMLElement).closest("[data-icon]")) return;
+    const target = e.target as HTMLElement;
+    if(target.closest("[data-icon]")) return;
+    // Window上での操作はアイコン選択をクリアするだけで範囲選択は開始しない
+    if(target.closest("[data-window]") || target.closest("[data-context-menu]")){
+      setSelectedIds(new Set());
+      setContextMenu(null);
+      return;
+    }
     setSelectedIds(new Set());
     setStartOpen(false);
     setContextMenu(null);
@@ -908,7 +915,7 @@ export default function App() {
 
       {/* Context menu */}
       {contextMenu && (
-        <ContextMenu $x={contextMenu.x} $y={contextMenu.y} onClick={e=>e.stopPropagation()}>
+        <ContextMenu data-context-menu $x={contextMenu.x} $y={contextMenu.y} onClick={e=>e.stopPropagation()}>
           <MenuList style={{ width:"100%" }}>
             <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Auto Arrange</MenuListItem>
             <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Line up Icons</MenuListItem>

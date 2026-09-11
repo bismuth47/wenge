@@ -153,7 +153,7 @@ export function WindowFrame({
   );
 
   return (
-    <StyledWindow $x={x} $y={y} $w={width} $h={height} $z={zIndex} $maximized={!!maximized} onMouseDown={onFocus}>
+    <StyledWindow data-window $x={x} $y={y} $w={width} $h={height} $z={zIndex} $maximized={!!maximized} onMouseDown={onFocus}>
       <Header active={!!active} onMouseDown={handleHeaderMouseDown}>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {iconSrc ? (
