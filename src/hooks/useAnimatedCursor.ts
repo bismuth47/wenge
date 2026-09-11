@@ -41,11 +41,28 @@ export function useAnimatedCursor() {
           document.documentElement.style.cursor.includes("appstarting")
         ) {
           // Check if any element has a custom cursor set (e.g., on menu items)
+          // Exclude standard cursors like arrow.png
           const customCursorExists = Array.from(document.querySelectorAll("*[style*=cursor]"))
             .slice(0, 20)
             .some(el => {
               const cursor = (el as HTMLElement).style.cursor;
-              return cursor && !cursor.includes("auto") && !cursor.includes("default");
+              // Check if this is a Windows 95 custom cursor (not arrow.png)
+              return (
+                cursor &&
+                !cursor.includes("auto") &&
+                !cursor.includes("default") &&
+                !cursor.includes("url('/cursors/arrow.png')") &&
+                !cursor.includes("url('/cursors/wait_0.png')") &&
+                !cursor.includes("url('/cursors/wait_1.png')") &&
+                !cursor.includes("url('/cursors/wait_2.png')") &&
+                !cursor.includes("url('/cursors/wait_3.png')") &&
+                !cursor.includes("url('/cursors/wait_4.png')") &&
+                !cursor.includes("url('/cursors/wait_5.png')") &&
+                !cursor.includes("url('/cursors/wait_6.png')") &&
+                !cursor.includes("url('/cursors/wait_7.png')") &&
+                !cursor.includes("url('/cursors/appstarting.png')") &&
+                !cursor.includes("url('/cursors/progress')")
+              );
             });
 
           // Only reset if no custom cursors are set on any element
