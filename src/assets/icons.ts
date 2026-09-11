@@ -18,6 +18,7 @@ export const ICONS = {
   folderClosed: "/icons/folder_closed.png",
   folderOpen: "/icons/folder_open.png",
   fileWindows: "/icons/file_windows.png",
+  mediaPlayer: "/icons/cd.png",
 } as const;
 
 // Fallback emoji for when image fails to load
@@ -41,4 +42,5 @@ export const ICON_FALLBACK: Record<string, string> = {
   folderClosed: "📁",
   folderOpen: "📂",
   fileWindows: "📄",
+  mediaPlayer: "🎵",
 };

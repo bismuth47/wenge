@@ -28,6 +28,7 @@ import { FileShareApp } from "./apps/FileShare";
 import { ChatApp } from "./apps/ChatApp";
 import { ControlPanelApp } from "./apps/ControlPanel";
 import { MinesweeperApp } from "./apps/Minesweeper";
+import { MediaPlayerApp } from "./apps/MediaPlayer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
 
 // --- Types ---
@@ -41,6 +42,7 @@ type AppId =
   | "about"
   | "control"
   | "minesweeper"
+  | "media-player"
   | "paint"
   | "calc"
   | "explorer"
@@ -65,11 +67,14 @@ type WinState = {
 const Desktop = styled.div`
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   background: #008080;
   position: relative;
   overflow: hidden;
   padding-bottom: 30px;
   box-sizing: border-box;
+  /* ブラウザサイズに追従 — 小さい画面でもスクロールせず収まる */
+  min-width: 320px;
 `;
 
 const Icons = styled.div`
@@ -82,6 +87,10 @@ const Icons = styled.div`
   height: calc(100% - 30px);
   width: 100%;
   box-sizing: border-box;
+  @media (max-width: 600px) {
+    gap: 8px;
+    padding: 8px;
+  }
 `;
 
 const Icon = styled.div<{ $selected?: boolean }>`
@@ -129,10 +138,18 @@ const IconLabel = styled.div`
 
 const Taskbar = styled(AppBar)`
   position: fixed !important;
-  bottom: 0;
+  bottom: 0 !important;
   top: auto !important;
-  height: 30px;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  height: 30px !important;
   z-index: 9999;
+  /* AppBarの2px outset borderのうち下側を消して画面端にピタッと付ける */
+  border-bottom: 0 !important;
+  border-right: 0 !important;
+  border-left: 0 !important;
+  box-sizing: border-box;
 `;
 
 const StartMenuWrap = styled.div`
@@ -144,6 +161,8 @@ const StartMenuWrap = styled.div`
 `;
 
 // --- App definitions ---
+// アイコン: react95にアイコンセットは無いため(v4)、本物のWin95 PNGを使用 (public/icons/*)
+// Media PlayerはWin95のmplayer/cdplayerを再現 — 本物アイコン = cd.png を流用
 const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w: number; h: number; component: React.ReactNode }> = {
   "my-computer": { title: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer, w: 420, h: 340, component: <MyComputerApp /> },
   recycle: { title: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle, w: 400, h: 300, component: <RecycleBinApp /> },
@@ -154,6 +173,7 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   about: { title: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about, w: 380, h: 340, component: <AboutWengeApp /> },
   control: { title: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel, w: 460, h: 380, component: <ControlPanelApp /> },
   minesweeper: { title: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper, w: 340, h: 380, component: <MinesweeperApp /> },
+  "media-player": { title: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer, w: 520, h: 460, component: <MediaPlayerApp /> },
   paint: { title: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
   calc: { title: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
   explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 520, h: 360, component: <ExplorerApp /> },
@@ -389,6 +409,32 @@ export default function App() {
     }
   }, [playStartup, startupPlayed]);
 
+  // レスポンシブ: ブラウザサイズ変更時にウィンドウが画面外に出ないようクランプ
+  useEffect(() => {
+    const clampWindows = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const taskbarH = 30;
+      setWindows((prev) =>
+        prev.map((w) => {
+          if (w.isMaximized) return w;
+          const maxW = Math.min(w.w, vw - 16);
+          const maxH = Math.min(w.h, vh - taskbarH - 16);
+          const nx = Math.min(Math.max(0, w.x), Math.max(0, vw - maxW - 4));
+          const ny = Math.min(Math.max(0, w.y), Math.max(0, vh - taskbarH - maxH - 4));
+          if (nx !== w.x || ny !== w.y || maxW !== w.w || maxH !== w.h) {
+            return { ...w, x: nx, y: ny, w: maxW, h: maxH };
+          }
+          return w;
+        })
+      );
+    };
+    window.addEventListener("resize", clampWindows);
+    // 初回もクランプ（小さい画面で開いた場合）
+    clampWindows();
+    return () => window.removeEventListener("resize", clampWindows);
+  }, []);
+
   const focusedId = useMemo(() => {
     const open = windows.filter((w) => w.isOpen && !w.isMinimized);
     if (open.length === 0) return null;
@@ -405,9 +451,16 @@ export default function App() {
       }
       maxZ.current += 1;
       const def = APP_DEFS[id];
+      // レスポンシブ: ビューポートより大きいウィンドウは縮小
+      const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
+      const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+      const cw = Math.min(def.w, vw - 16);
+      const ch = Math.min(def.h, vh - 30 - 16);
+      const cx = Math.max(4, Math.min(60 + Math.random() * 80, vw - cw - 4));
+      const cy = Math.max(4, Math.min(40 + Math.random() * 60, vh - 30 - ch - 4));
       return [
         ...prev,
-        { id, title: def.title, icon: def.icon, iconSrc: def.iconSrc, isOpen: true, isMinimized: false, isMaximized: false, x: 60 + Math.random() * 80, y: 40 + Math.random() * 60, w: def.w, h: def.h, z: maxZ.current },
+        { id, title: def.title, icon: def.icon, iconSrc: def.iconSrc, isOpen: true, isMinimized: false, isMaximized: false, x: cx, y: cy, w: cw, h: ch, z: maxZ.current },
       ];
     });
   };
@@ -433,10 +486,24 @@ export default function App() {
   };
 
   const updatePos = (id: AppId, x: number, y: number) =>
-    setWindows((p) => p.map((w) => (w.id === id ? { ...w, x: Math.max(0, x), y: Math.max(0, y) } : w)));
+    setWindows((p) => p.map((w) => {
+      if (w.id !== id) return w;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const maxX = Math.max(0, vw - w.w - 4);
+      const maxY = Math.max(0, vh - 30 - w.h - 4);
+      return { ...w, x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
+    }));
 
   const updateSize = (id: AppId, nw: number, nh: number) =>
-    setWindows((p) => p.map((win) => (win.id === id ? { ...win, w: nw, h: nh } : win)));
+    setWindows((p) => p.map((win) => {
+      if (win.id !== id) return win;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const cw = Math.min(nw, vw - win.x - 4);
+      const ch = Math.min(nh, vh - 30 - win.y - 4);
+      return { ...win, w: cw, h: ch };
+    }));
 
   const desktopIcons: { id: AppId; label: string; icon: string; iconSrc: string }[] = [
     { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
@@ -450,6 +517,7 @@ export default function App() {
     { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
     { id: "control", label: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel },
     { id: "minesweeper", label: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper },
+    { id: "media-player", label: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer },
     { id: "about", label: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about },
   ];
 
@@ -581,8 +649,26 @@ export default function App() {
                 <div style={{ flex: 1 }}>
                   <MenuListItem onClick={() => { openWindow("my-computer"); setStartOpen(false); }}>
                     <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Programs
+                    Programs ►
                   </MenuListItem>
+                  <div style={{ paddingLeft: 12, background: "#c0c0c0" }}>
+                    <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                      Media Player
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("paint"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.paint} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                      Paint
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("notepad"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.notepad} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                      Notepad
+                    </MenuListItem>
+                    <MenuListItem onClick={() => { openWindow("calc"); setStartOpen(false); }} style={{ fontSize: 11 }}>
+                      <img src={ICONS.calc} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                      Calculator
+                    </MenuListItem>
+                  </div>
                   <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }}>
                     <img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
                     Documents
@@ -590,6 +676,10 @@ export default function App() {
                   <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }}>
                     <img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
                     Settings
+                  </MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); }}>
+                    <img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+                    Media Player
                   </MenuListItem>
                   <MenuListItem onClick={() => { openWindow("file-share"); setStartOpen(false); }}>
                     <img src={ICONS.fileShare} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
@@ -615,7 +705,7 @@ export default function App() {
 
       {/* Taskbar */}
       <Taskbar>
-        <Toolbar style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <Toolbar style={{ justifyContent: "space-between", alignItems: "center", padding: "2px 4px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <Button
               onClick={(e) => { e.stopPropagation(); setStartOpen(!startOpen); playChord(); }}

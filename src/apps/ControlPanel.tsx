@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button, Checkbox, Fieldset, Radio, Select, Slider } from "react95";
+import { getSoundEnabled, setSoundEnabled, SOUNDS } from "../hooks/useSound";
 
 export function ControlPanelApp() {
   const [bg, setBg] = useState("#008080");
   const [volume, setVolume] = useState(70);
+  const [soundEnabled, setSoundEnabledState] = useState(() => getSoundEnabled());
+  useEffect(() => { setSoundEnabled(soundEnabled); }, [soundEnabled]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Fieldset label="Display">
@@ -31,13 +34,15 @@ export function ControlPanelApp() {
       <Fieldset label="Sound">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 12 }}>Volume</span>
-          <div style={{ width: 150 }}><Slider value={volume} onChange={(e: any) => setVolume(e.target.value)} min={0} max={100} /></div>
+          <div style={{ width: 150 }}><Slider value={volume} onChange={(e: any) => setVolume(Number(e.target.value))} min={0} max={100} /></div>
           <span style={{ fontSize: 12 }}>{volume}%</span>
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <Checkbox checked value="startup" label="Startup sound" />
-          <Checkbox checked value="chord" label="Navigation sound" />
-          <Checkbox checked={false} value="mute" label="Mute" />
+        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <Checkbox checked={soundEnabled} onChange={() => setSoundEnabledState((v) => !v)} value="enabled" label="Sound enabled (default ON)" />
+          <Button size="sm" onClick={() => { const a = new Audio(SOUNDS.chord); a.volume = volume / 100; if (!soundEnabled) a.muted = true; a.play().catch(()=>{}); }}>Test</Button>
+        </div>
+        <div style={{ fontSize: 10, color: "#808080", marginTop: 4 }}>
+          デフォルトON。OFFにすると全ての効果音(起動/操作/エラー)がミュートされます。Media Playerの音量は別。
         </div>
       </Fieldset>
 

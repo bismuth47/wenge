@@ -31,7 +31,8 @@ const GlobalStyles = createGlobalStyle`
     font-family: 'ms_sans_serif';
     font-size: 12px;
   }
-  #root { width: 100vw; height: 100vh; }
+  #root { width: 100vw; height: 100vh; height: 100dvh; }
+  html { height: 100%; overflow: hidden; }
 `;
 
 createRoot(document.getElementById("root")!).render(

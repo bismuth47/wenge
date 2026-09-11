@@ -11,6 +11,13 @@ const StyledWindow = styled(Window)<{ $x: number; $y: number; $w: number; $h: nu
   z-index: ${(p) => p.$z};
   display: flex;
   flex-direction: column;
+  max-width: 100vw;
+  max-height: calc(100vh - 30px);
+  max-height: calc(100dvh - 30px);
+  @media (max-width: 600px) {
+    /* 小さい画面では最大幅を画面幅に制限 */
+    max-width: calc(100vw - 8px);
+  }
 `;
 
 const Header = styled(WindowHeader)`
@@ -127,8 +134,11 @@ export function WindowFrame({
         if (!resizeRef.current) return;
         const dx = ev.clientX - resizeRef.current.sx;
         const dy = ev.clientY - resizeRef.current.sy;
-        const nw = Math.max(260, resizeRef.current.sw + dx);
-        const nh = Math.max(180, resizeRef.current.sh + dy);
+        // 最小サイズは画面幅に応じて可変（モバイルでは200pxまで縮小可）
+        const minW = window.innerWidth < 600 ? 200 : 260;
+        const minH = 180;
+        const nw = Math.max(minW, resizeRef.current.sw + dx);
+        const nh = Math.max(minH, resizeRef.current.sh + dy);
         onResize(nw, nh);
       };
       const onUp = () => {

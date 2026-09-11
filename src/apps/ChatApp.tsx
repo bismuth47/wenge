@@ -34,7 +34,10 @@ export function ChatApp() {
     const pusher = new Pusher(key, { cluster });
     const ch = pusher.subscribe("wenge-chat");
     ch.bind("new-message", (msg: Message) => {
-      setMessages((prev) => [...prev.slice(-99), msg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev.slice(-99), msg];
+      });
     });
     return () => {
       ch.unbind_all();
@@ -51,8 +54,11 @@ export function ChatApp() {
     if (!text.trim()) return;
     const msg: Message = { id: Date.now().toString(), user, text: text.trim(), createdAt: new Date().toISOString() };
     setText("");
-    // optimistic
-    setMessages((prev) => [...prev, msg]);
+    // optimistic (deduplicated on Pusher echo via id check)
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      return [...prev.slice(-99), msg];
+    });
     localStorage.setItem("wenge_user", user);
     try {
       const res = await fetch("/api/chat", {
