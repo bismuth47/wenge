@@ -261,6 +261,7 @@ const StartMenuWrap = styled.div`
   width: 210px;
   max-height: calc(100vh - 40px);
   overflow: visible;
+  cursor: url('/cursors/arrow.png') 0 0, default;
 `;
 
 // --- App definitions ---
@@ -1064,13 +1065,13 @@ export default function App() {
                 <div style={{ flex: 1, position:"relative" }}>
                   {/* Programs with cascading submenu */}
                   <div onMouseEnter={()=>setProgramsOpen(true)} onMouseLeave={()=>setProgramsOpen(false)} style={{ position:"relative" }}>
-                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", fontSize:11 }}>
+                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", fontSize:11, cursor: "url('/cursors/arrow.png') 0 0, default" }}>
                       <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />
                       Programs <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                     </MenuListItem>
                     {programsOpen && (
-                      <div style={{ position:"absolute", left:"100%", top:-4, width:200, zIndex:9999 }}>
-                        <Frame variant="outside" style={{ padding:2, background:"#c0c0c0" }}>
+                      <div style={{ position:"absolute", left:"100%", top:-4, width:200, zIndex:9999, cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                        <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
                           <MenuList style={{ width:"100%" }}>
                             <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", background:"#c0c0c0", fontWeight:"bold" }}>Accessories</div>
                             <MenuListItem onClick={() => { openWindow("wordpad", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.wordpad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> WordPad</MenuListItem>
@@ -1109,15 +1110,15 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {/* 実機7項目 */}
-                  <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} /> Documents <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("control", { silent: true }); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Settings <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("find", { silent: true }); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.find} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Find <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("help", { silent: true }); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.help} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Help</MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("run", { silent: true }); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...</MenuListItem>
-                  <Separator />
-                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26 }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Blue Screen</MenuListItem>
-                  <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }} style={{ height:26 }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Shut Down...</MenuListItem>
+{/* 実機7項目 */}
+                   <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} /> Documents <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                   <MenuListItem onClick={() => { openWindow("control", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Settings <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                   <MenuListItem onClick={() => { openWindow("find", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.find} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Find <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                   <MenuListItem onClick={() => { openWindow("help", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.help} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Help</MenuListItem>
+                   <MenuListItem onClick={() => { openWindow("run", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...</MenuListItem>
+                   <Separator />
+                   <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Blue Screen</MenuListItem>
+                   <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Shut Down...</MenuListItem>
                 </div>
               </div>
             </MenuList>

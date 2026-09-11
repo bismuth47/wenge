@@ -34,10 +34,25 @@ export function useAnimatedCursor() {
         document.body.style.cursor = `url('${url}') 0 0, progress`;
         frame = (frame + 1) % WAIT_FRAMES;
       } else {
-        // Reset to default if we previously overrode
-        if (document.documentElement.style.cursor.includes("wait_") || document.documentElement.style.cursor.includes("appstarting")) {
-          document.documentElement.style.cursor = "";
-          document.body.style.cursor = "";
+        // Reset to default only if we previously overrode AND no element is being hovered
+        // (element-level cursor should take priority over body)
+        if (
+          document.documentElement.style.cursor.includes("wait_") ||
+          document.documentElement.style.cursor.includes("appstarting")
+        ) {
+          // Check if any element has a custom cursor set (e.g., on menu items)
+          const customCursorExists = Array.from(document.querySelectorAll("*[style*=cursor]"))
+            .slice(0, 20)
+            .some(el => {
+              const cursor = (el as HTMLElement).style.cursor;
+              return cursor && !cursor.includes("auto") && !cursor.includes("default");
+            });
+
+          // Only reset if no custom cursors are set on any element
+          if (!customCursorExists) {
+            document.documentElement.style.cursor = "";
+            document.body.style.cursor = "";
+          }
         }
       }
     };
