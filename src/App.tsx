@@ -205,17 +205,25 @@ const Taskbar = styled(AppBar)`
   right: 0 !important;
   width: 100% !important;
   height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
   z-index: 9999;
   border-bottom: 0 !important;
   border-right: 0 !important;
   border-left: 0 !important;
   box-sizing: border-box;
+  display: flex !important;
+  align-items: center !important;
 `;
 
 const StartButton = styled.button<{ $active?: boolean }>`
   width: 56px;
   height: 22px;
-  margin: 2px 0 2px 4px;
+  min-height: 22px;
+  max-height: 22px;
+  margin: 0 0 0 4px;
+  flex-shrink: 0;
+  align-self: center;
   background: #c0c0c0;
   border-top: 2px solid #fff;
   border-left: 2px solid #fff;
@@ -230,9 +238,11 @@ const StartButton = styled.button<{ $active?: boolean }>`
   align-items: center;
   gap: 4px;
   padding: 0 4px;
+  box-sizing: border-box;
   cursor: url('/cursors/arrow.png') 0 0, default;
   user-select: none;
   position: relative;
+  vertical-align: middle;
   ${(p) => p.$active && `
     border-top: 2px solid #808080;
     border-left: 2px solid #808080;
@@ -1119,8 +1129,8 @@ export default function App() {
 
       {/* Taskbar */}
       <Taskbar data-taskbar>
-        <Toolbar style={{ justifyContent: "space-between", alignItems: "center", padding: "2px 4px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <Toolbar style={{ justifyContent: "space-between", alignItems: "center", padding: "0 4px", height: "100%", boxSizing: "border-box", flexWrap: "nowrap", minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, height: "100%", minHeight: 0 }}>
             <StartButton
               data-start-menu
               data-start-button
