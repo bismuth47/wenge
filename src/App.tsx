@@ -212,14 +212,47 @@ const Taskbar = styled(AppBar)`
   box-sizing: border-box;
 `;
 
+const StartButton = styled.button<{ $active?: boolean }>`
+  width: 56px;
+  height: 22px;
+  margin: 2px 0 2px 4px;
+  background: #c0c0c0;
+  border-top: 2px solid #fff;
+  border-left: 2px solid #fff;
+  border-right: 2px solid #808080;
+  border-bottom: 2px solid #808080;
+  box-shadow: inset 0 0 0 1px #dfdfdf, 1px 1px 0 #000;
+  font-family: 'ms_sans_serif';
+  font-weight: bold;
+  font-size: 11px;
+  line-height: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  cursor: url('/cursors/arrow.png') 0 0, default;
+  user-select: none;
+  position: relative;
+  ${(p) => p.$active && `
+    border-top: 2px solid #808080;
+    border-left: 2px solid #808080;
+    border-right: 2px solid #fff;
+    border-bottom: 2px solid #fff;
+    box-shadow: inset 1px 1px 0 #000;
+    padding-top: 1px;
+    padding-left: 5px;
+  `}
+  &:focus { outline: none; }
+`;
+
 const StartMenuWrap = styled.div`
   position: fixed;
   left: 2px;
   bottom: 32px;
   z-index: 9998;
-  width: 260px;
+  width: 210px;
   max-height: calc(100vh - 40px);
-  overflow-y: auto;
+  overflow: visible;
 `;
 
 // --- App definitions ---
@@ -498,6 +531,7 @@ export default function App() {
   const [contextMenu,setContextMenu]=useState<{x:number,y:number}|null>(null);
   const longPressTimer=useRef<number|null>(null);
   const [startOpen, setStartOpen] = useState(false);
+  const [programsOpen, setProgramsOpen] = useState(false);
   const [showBsod, setShowBsod] = useState(false);
   const maxZ = useRef(20);
   const [startupPlayed, setStartupPlayed] = useState(false);
@@ -728,10 +762,13 @@ export default function App() {
     if(target.closest("[data-window]") || target.closest("[data-context-menu]")){
       setSelectedIds(new Set());
       setContextMenu(null);
+      setStartOpen(false);
+      setProgramsOpen(false);
       return;
     }
     setSelectedIds(new Set());
     setStartOpen(false);
+    setProgramsOpen(false);
     setContextMenu(null);
     if(e.button!==0) return;
     const rect=desktopRef.current?.getBoundingClientRect();
@@ -848,7 +885,7 @@ export default function App() {
   return (
     <Desktop
       ref={desktopRef}
-      onClick={() => { setSelectedIds(new Set()); setStartOpen(false); setContextMenu(null); }}
+      onClick={() => { setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setContextMenu(null); }}
       onMouseDown={handleDesktopMouseDown}
       onMouseMove={handleDesktopMouseMove}
       onMouseUp={handleDesktopMouseUp}
@@ -988,110 +1025,76 @@ export default function App() {
         </div>
       )}
 
-      {/* Start Menu */}
+      {/* Start Menu — Win95準拠 実機7項目 + Programs配下 */}
       {startOpen && (
         <StartMenuWrap onClick={(e) => e.stopPropagation()}>
           <Frame variant="outside" style={{ padding: 2, background: "#c0c0c0" }}>
             <MenuList style={{ width: "100%" }}>
               <div style={{ display: "flex" }}>
+                {/* 左帯 Wenge95 実機フォント準拠 */}
                 <div style={{
-                  width: 22, background: "#000080", color: "#fff", writingMode: "vertical-rl",
-                  textOrientation: "mixed", fontWeight: "bold", fontSize: 13, display: "grid", placeItems: "center", padding: "6px 0"
+                  width: 21, background: "#000080", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", padding: "8px 0 10px", gap: 2, flexShrink:0
                 }}>
-                  Wenge95
+                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: "'MS Sans Serif', 'Microsoft Sans Serif', sans-serif", fontWeight: 900, fontSize: 11, color: "#fff", letterSpacing: 0.5, lineHeight: 1 }}>Wenge</div>
+                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontFamily: "Arial, sans-serif", fontWeight: 400, fontSize: 11, color: "#c0c0c0", lineHeight: 1 }}>95</div>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <MenuListItem onClick={() => { openWindow("my-computer"); setStartOpen(false); }}>
-                    <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-                    Programs ►
-                  </MenuListItem>
-                  <div style={{ paddingLeft: 8, background: "#c0c0c0", maxHeight:200, overflowY:"auto" }}>
-                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px" }}>Accessories</div>
-                    <MenuListItem onClick={() => { openWindow("wordpad"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.wordpad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> WordPad
+                <div style={{ flex: 1, position:"relative" }}>
+                  {/* Programs with cascading submenu */}
+                  <div onMouseEnter={()=>setProgramsOpen(true)} onMouseLeave={()=>setProgramsOpen(false)} style={{ position:"relative" }}>
+                    <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", fontSize:11 }}>
+                      <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />
+                      Programs <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                     </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("notepad"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.notepad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Notepad
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("paint"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.paint} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Paint
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("calc"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.calc} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Calculator
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("clock"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.clock} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Clock
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("charmap"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.charmap} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Character Map
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("msdos"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.msdos} alt="" width={16} height={16} style={{ marginRight: 8 }} /> MS-DOS Prompt
-                    </MenuListItem>
-                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px", marginTop:4 }}>Multimedia</div>
-                    <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Media Player
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("cd-player"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.cdPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> CD Player
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("sound-recorder"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.soundRecorder} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Sound Recorder
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("volume"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.volume} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Volume Control
-                    </MenuListItem>
-                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px", marginTop:4 }}>Games</div>
-                    <MenuListItem onClick={() => { openWindow("minesweeper"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.minesweeper} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Minesweeper
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("solitaire"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.solitaire} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Solitaire
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("freecell"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.freecell} alt="" width={16} height={16} style={{ marginRight: 8 }} /> FreeCell
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("hearts"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.hearts} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Hearts
-                    </MenuListItem>
-                    <div style={{ fontSize:10, color:"#808080", padding:"2px 4px", marginTop:4 }}>System Tools</div>
-                    <MenuListItem onClick={() => { openWindow("scandisk"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.scandisk} alt="" width={16} height={16} style={{ marginRight: 8 }} /> ScanDisk
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("backup"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.backup} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Backup
-                    </MenuListItem>
-                    <MenuListItem onClick={() => { openWindow("sysmon"); setStartOpen(false); }} style={{ fontSize: 11 }}>
-                      <img src={ICONS.sysmon} alt="" width={16} height={16} style={{ marginRight: 8 }} /> System Monitor
-                    </MenuListItem>
+                    {programsOpen && (
+                      <div style={{ position:"absolute", left:"100%", top:-4, width:200, zIndex:9999 }}>
+                        <Frame variant="outside" style={{ padding:2, background:"#c0c0c0" }}>
+                          <MenuList style={{ width:"100%" }}>
+                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", background:"#c0c0c0", fontWeight:"bold" }}>Accessories</div>
+                            <MenuListItem onClick={() => { openWindow("wordpad"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.wordpad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> WordPad</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("notepad"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.notepad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Notepad</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("paint"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.paint} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Paint</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("calc"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.calc} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Calculator</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("clock"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.clock} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Clock</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("charmap"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.charmap} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Character Map</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("msdos"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.msdos} alt="" width={16} height={16} style={{ marginRight: 8 }} /> MS-DOS Prompt</MenuListItem>
+                            <Separator />
+                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", fontWeight:"bold" }}>Multimedia</div>
+                            <MenuListItem onClick={() => { openWindow("media-player"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Media Player</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("cd-player"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.cdPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> CD Player</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("sound-recorder"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.soundRecorder} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Sound Recorder</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("volume"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.volume} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Volume Control</MenuListItem>
+                            <Separator />
+                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", fontWeight:"bold" }}>Games</div>
+                            <MenuListItem onClick={() => { openWindow("minesweeper"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.minesweeper} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Minesweeper</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("solitaire"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.solitaire} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Solitaire</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("freecell"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.freecell} alt="" width={16} height={16} style={{ marginRight: 8 }} /> FreeCell</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("hearts"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.hearts} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Hearts</MenuListItem>
+                            <Separator />
+                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", fontWeight:"bold" }}>System Tools</div>
+                            <MenuListItem onClick={() => { openWindow("scandisk"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.scandisk} alt="" width={16} height={16} style={{ marginRight: 8 }} /> ScanDisk</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("backup"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.backup} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Backup</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("sysmon"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.sysmon} alt="" width={16} height={16} style={{ marginRight: 8 }} /> System Monitor</MenuListItem>
+                            <Separator />
+                            <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Explorer</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("file-share"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.fileShare} alt="" width={16} height={16} style={{ marginRight: 8 }} /> File Share</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("chat"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.chat} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Wenge Chat</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("briefcase"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.briefcase} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Briefcase</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("dialer"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.dialer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Phone Dialer</MenuListItem>
+                            <MenuListItem onClick={() => { openWindow("network"); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }}><img src={ICONS.network} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Network Neighborhood</MenuListItem>
+                          </MenuList>
+                        </Frame>
+                      </div>
+                    )}
                   </div>
-                  <MenuListItem onClick={() => { openWindow("help"); setStartOpen(false); }}>
-                    <img src={ICONS.help} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Help
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("find"); setStartOpen(false); }}>
-                    <img src={ICONS.find} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Find
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("briefcase"); setStartOpen(false); }}>
-                    <img src={ICONS.briefcase} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Briefcase
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("dialer"); setStartOpen(false); }}>
-                    <img src={ICONS.dialer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Phone Dialer
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("network"); setStartOpen(false); }}>
-                    <img src={ICONS.network} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Network
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }}>
-                    <img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Documents
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }}>
-                    <img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Settings
-                  </MenuListItem>
-                  <MenuListItem onClick={() => { openWindow("run"); setStartOpen(false); }}>
-                    <img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...
-                  </MenuListItem>
+                  {/* 実機7項目 */}
+                  <MenuListItem onClick={() => { openWindow("explorer"); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} /> Documents <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("control"); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Settings <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("find"); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.find} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Find <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("help"); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.help} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Help</MenuListItem>
+                  <MenuListItem onClick={() => { openWindow("run"); setStartOpen(false); }} style={{ height:32 }}><img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...</MenuListItem>
                   <Separator />
-                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} />Blue Screen</MenuListItem>
-                  <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} />Shut Down...</MenuListItem>
+                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26 }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Blue Screen</MenuListItem>
+                  <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }} style={{ height:26 }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Shut Down...</MenuListItem>
                 </div>
               </div>
             </MenuList>
@@ -1103,13 +1106,12 @@ export default function App() {
       <Taskbar>
         <Toolbar style={{ justifyContent: "space-between", alignItems: "center", padding: "2px 4px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <Button
-              onClick={(e) => { e.stopPropagation(); setStartOpen(!startOpen); playChord(); }}
-              active={startOpen}
-              style={{ fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}
+            <StartButton
+              $active={startOpen}
+              onClick={(e) => { e.stopPropagation(); setStartOpen(v=>!v); setProgramsOpen(false); playChord(); }}
             >
               <img src={ICONS.start} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} /> Start
-            </Button>
+            </StartButton>
             <Separator orientation="vertical" size="24px" style={{ margin: "0 4px" }} />
             <div style={{ display: "flex", gap: 2, flexWrap: "nowrap", overflow: "hidden" }}>
               {windows.filter(w => w.isOpen).map(w => (
