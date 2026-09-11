@@ -1090,8 +1090,8 @@ export default function App() {
                     <img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...
                   </MenuListItem>
                   <Separator />
-                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><span style={{ marginRight: 8 }}>💥</span>Blue Screen</MenuListItem>
-                  <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }}><span style={{ marginRight: 8 }}>⏻</span>Shut Down...</MenuListItem>
+                  <MenuListItem onClick={() => { playError(); setShowBsod(true); }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} />Blue Screen</MenuListItem>
+                  <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} />Shut Down...</MenuListItem>
                 </div>
               </div>
             </MenuList>
@@ -1108,7 +1108,7 @@ export default function App() {
               active={startOpen}
               style={{ fontWeight: "bold", display: "flex", alignItems: "center", gap: 4 }}
             >
-              <span style={{ fontSize: 14 }}>▦</span> Start
+              <img src={ICONS.start} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} /> Start
             </Button>
             <Separator orientation="vertical" size="24px" style={{ margin: "0 4px" }} />
             <div style={{ display: "flex", gap: 2, flexWrap: "nowrap", overflow: "hidden" }}>
@@ -1141,7 +1141,7 @@ export default function App() {
             </div>
           </div>
           <Frame variant="well" style={{ padding: "2px 6px", display: "flex", alignItems: "center", gap: 8, minWidth: 90, justifyContent: "flex-end" }}>
-            <span style={{ fontSize: 10 }}>🔊</span>
+            <img src={ICONS.volume} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} />
             <span style={{ fontSize: 11 }}>{clock.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
           </Frame>
         </Toolbar>
