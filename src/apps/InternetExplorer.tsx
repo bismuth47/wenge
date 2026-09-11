@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95";
 
-const DEFAULT_URL = "https://www.bing.com/search?q=wenge";
 const QUICK_LINKS = [
-  "https://www.bing.com/search?q=wenge",
-  "https://ja.wikipedia.org/w/index.php?search=wenge",
+  "https://www.bing.com/",
+  "https://ja.wikipedia.org/",
   "https://example.com",
   "https://www.wikipedia.org",
 ];
@@ -48,15 +47,15 @@ function toWikipediaUrl(query: string): string {
 type BlockInfo = { query: string; code: string | null; email: string | null; originalUrl: string };
 
 export function InternetExplorerApp() {
-  const [address, setAddress] = useState(DEFAULT_URL);
-  const [currentUrl, setCurrentUrl] = useState(DEFAULT_URL);
-  const [historyStack, setHistoryStack] = useState<string[]>([DEFAULT_URL]);
-  const [hIndex, setHIndex] = useState(0);
-  const hIndexRef = useRef(0);
+  const [address, setAddress] = useState("");
+  const [currentUrl, setCurrentUrl] = useState("");
+  const [historyStack, setHistoryStack] = useState<string[]>([]);
+  const [hIndex, setHIndex] = useState(-1);
+  const hIndexRef = useRef(-1);
   const [useProxy, setUseProxy] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusText, setStatusText] = useState("Bing (プロキシ経由)");
+  const [statusText, setStatusText] = useState("準備完了 - URLまたは検索ワードを入力してください");
   const [probeInfo, setProbeInfo] = useState<string | null>(null);
   const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
@@ -208,8 +207,12 @@ export function InternetExplorerApp() {
   );
 
   useEffect(() => {
+    if (historyStack.length === 0) {
+      if (hIndex !== -1) setHIndex(-1);
+      return;
+    }
     if (hIndex >= historyStack.length) setHIndex(historyStack.length - 1);
-    if (hIndex < 0 && historyStack.length > 0) setHIndex(0);
+    if (hIndex < 0) setHIndex(0);
   }, [historyStack, hIndex]);
 
   const goBack = () => {
@@ -336,6 +339,7 @@ export function InternetExplorerApp() {
   }, [currentUrl, useProxy, loading, reloadKey]);
 
   useEffect(() => {
+    if (!currentUrl) return;
     doProbe(currentUrl).then((blocked) => {
       if (blocked) setUseProxy(true);
     });
@@ -444,30 +448,47 @@ export function InternetExplorerApp() {
       )}
 
       <div style={{ flex: 1, minHeight: 260, background: "#fff", border: "2px inset #fff", padding: 2, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
-          <iframe
-            key={`${iframeSrc}::${reloadKey}::${useProxy ? "proxy" : "direct"}`}
-            ref={iframeRef}
-            src={iframeSrc}
-            title="Wenge IE"
-            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
-            allow="fullscreen; autoplay; clipboard-read; clipboard-write"
-            style={{ width: "100%", height: "100%", border: "none", background: "#fff" }}
-            onLoad={handleIframeLoad}
-            onError={handleIframeError}
-          />
-          {loading && (
-            <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.85)", display: "grid", placeItems: "center", fontSize: 11, color: "#000080", flexDirection: "column", gap: 6 }}>
-              <div>Loading {currentUrl}...</div>
-              {ddgBlocked && <div style={{ fontSize: 10, color: "#808080" }}>DDGブロック検出時はBingに自動切替します</div>}
+        {currentUrl ? (
+          <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
+            <iframe
+              key={`${iframeSrc}::${reloadKey}::${useProxy ? "proxy" : "direct"}`}
+              ref={iframeRef}
+              src={iframeSrc}
+              title="Wenge IE"
+              sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
+              allow="fullscreen; autoplay; clipboard-read; clipboard-write"
+              style={{ width: "100%", height: "100%", border: "none", background: "#fff" }}
+              onLoad={handleIframeLoad}
+              onError={handleIframeError}
+            />
+            {loading && (
+              <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.85)", display: "grid", placeItems: "center", fontSize: 11, color: "#000080", flexDirection: "column", gap: 6 }}>
+                <div>Loading {currentUrl}...</div>
+                {ddgBlocked && <div style={{ fontSize: 10, color: "#808080" }}>DDGブロック検出時はBingに自動切替します</div>}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "#008080", padding: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 28, filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.6))" }}>🌐</div>
+            <div style={{ fontSize: 13, fontWeight: "bold", color: "#fff", textShadow: "1px 1px 0 #000" }}>Internet Explorer</div>
+            <div style={{ fontSize: 11, color: "#fff", textShadow: "1px 1px 0 #000", lineHeight: 1.5 }}>
+              アドレスバーに <b>URL</b> または <b>検索ワード</b> を入力して <b>Go</b> または <b>Enter</b> で開きます。<br />
+              検索ワードは Bing で窓内に表示されます。
             </div>
-          )}
-        </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+              <Button size="sm" onClick={() => navigateTo("https://www.bing.com/")}>Bing ホーム</Button>
+              <Button size="sm" onClick={() => navigateTo("https://ja.wikipedia.org/")}>Wikipedia</Button>
+              <Button size="sm" onClick={() => navigateTo("https://example.com")}>example.com</Button>
+            </div>
+            <div style={{ fontSize: 10, color: "#c0c0c0", textShadow: "1px 1px 0 #000" }}>ヒント: 例「wenge 使い方」「example.com」</div>
+          </div>
+        )}
       </div>
 
       <div style={{ fontSize: 11, background: "#c0c0c0", border: "2px inset", padding: "2px 6px", display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{statusText}</span>
-        <span style={{ flexShrink: 0, color: "#808080" }}>{useProxy ? "Proxy" : "Direct"} | {historyStack.length} pages</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUrl ? statusText : "準備完了"}</span>
+        <span style={{ flexShrink: 0, color: "#808080" }}>{currentUrl ? (useProxy ? "Proxy" : "Direct") : "0 pages"} | {historyStack.length} pages</span>
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}>
