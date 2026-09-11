@@ -828,7 +828,7 @@ export default function App() {
             nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
             ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
             // collision detection: check if this position overlaps with any other icon
-            const otherIcons = Object.keys(n).filter(id => id !== k && id !== "run");
+            const otherIcons = Object.keys(n).filter(id => id !== k);
             for (const otherId of otherIcons) {
               const otherPos = n[otherId];
               if (otherPos && Math.abs(otherPos.x - nx) < ICON_W && Math.abs(otherPos.y - ny) < ICON_H) {
@@ -927,7 +927,7 @@ export default function App() {
             nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
             ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
             // collision detection: check if this position overlaps with any other icon
-            const otherIcons = Object.keys(n).filter(id => id !== k && id !== "run");
+            const otherIcons = Object.keys(n).filter(id => id !== k);
             for (const otherId of otherIcons) {
               const otherPos = n[otherId];
               if (otherPos && Math.abs(otherPos.x - nx) < ICON_W && Math.abs(otherPos.y - ny) < ICON_H) {
