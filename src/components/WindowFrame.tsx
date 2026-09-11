@@ -62,6 +62,7 @@ const ResizeHandle = styled.div`
 `;
 
 export type WindowFrameProps = {
+  id: string;
   title: string;
   icon?: string;
   iconSrc?: string;
@@ -82,6 +83,7 @@ export type WindowFrameProps = {
 };
 
 export function WindowFrame({
+  id,
   title,
   icon,
   iconSrc,
@@ -153,7 +155,7 @@ export function WindowFrame({
   );
 
   return (
-    <StyledWindow data-window $x={x} $y={y} $w={width} $h={height} $z={zIndex} $maximized={!!maximized} onMouseDown={onFocus}>
+    <StyledWindow data-window data-window-id={id} $x={x} $y={y} $w={width} $h={height} $z={zIndex} $maximized={!!maximized} onMouseDown={onFocus}>
       <Header active={!!active} onMouseDown={handleHeaderMouseDown}>
 <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             {iconSrc ? (
