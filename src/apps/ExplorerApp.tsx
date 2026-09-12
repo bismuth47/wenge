@@ -14,6 +14,14 @@ import {
   type R2DragItem,
   type R2File,
 } from "../lib/r2";
+import {
+  DOWNLOADS_CHANGED_EVENT,
+  deleteDownload,
+  listDownloads,
+  openDownload,
+  type DownloadDoc,
+} from "../lib/downloads";
+import { handleDownload } from "../lib/downloadTarget";
 
 export type ExplorerOpenId = "notepad"|"wordpad"|"paint"|"calc"|"clock"|"msdos"|"minesweeper"|"solitaire"|"freecell"|"hearts"|"media-player"|"cd-player"|"sound-recorder"|"volume"|"control"|"help"|"find"|"recycle"|"network"|"my-computer"|string;
 
@@ -21,7 +29,7 @@ type FEntry = { name: string; size: string; type: string; app?: string };
 
 const FS: Record<string, { folders: string[]; files: FEntry[] }> = {
   "C:\\": { folders: ["Wenge","Windows","Program Files"], files: [{name:"AUTOEXEC.BAT",size:"1 KB",type:"Batch"},{name:"CONFIG.SYS",size:"1 KB",type:"System"}] },
-  "C:\\Wenge": { folders: ["Documents","Media","Games"], files: [{name:"README.txt",size:"2 KB",type:"Text",app:"notepad"},{name:"Wenge.bmp",size:"256 KB",type:"Bitmap",app:"paint"},{name:"Setup.exe",size:"1.2 MB",type:"Application"}] },
+  "C:\\Wenge": { folders: ["Documents","Media","Games","Downloads"], files: [{name:"README.txt",size:"2 KB",type:"Text",app:"notepad"},{name:"Wenge.bmp",size:"256 KB",type:"Bitmap",app:"paint"},{name:"Setup.exe",size:"1.2 MB",type:"Application"}] },
   "C:\\Wenge\\Documents": { folders: [], files: [{name:"README.txt",size:"2 KB",type:"Text",app:"notepad"},{name:"Report.doc",size:"45 KB",type:"Document",app:"wordpad"},{name:"Budget.xls",size:"32 KB",type:"Sheet"}] },
   "C:\\Wenge\\Media": { folders: [], files: [{name:"chimes.wav",size:"120 KB",type:"Sound",app:"media-player"},{name:"tada.wav",size:"80 KB",type:"Sound",app:"media-player"},{name:"Wenge.bmp",size:"256 KB",type:"Bitmap",app:"paint"}] },
   "C:\\Wenge\\Games": { folders: [], files: [{name:"Solitaire",size:"",type:"Game",app:"solitaire"},{name:"Minesweeper",size:"",type:"Game",app:"minesweeper"}] },
@@ -65,6 +73,9 @@ export function formatR2Path(prefix: string): string {
   return "R2:\\" + p.replace(/\//g, "\\").replace(/\\$/, "");
 }
 
+/** Virtual download folder backed by IndexedDB (see src/lib/downloads.ts). */
+export const DOWNLOADS_KEY = "C:\\Wenge\\Downloads";
+
 function formatSize(bytes: number): string {
   if (!bytes) return "0 KB";
   if (bytes < 1024) return "1 KB";
@@ -87,6 +98,24 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
   const [mkdirName, setMkdirName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const inR2 = r2Prefix !== null;
+  // --- Downloads (IndexedDB-backed virtual folder) state ---
+  const [dlDocs, setDlDocs] = useState<DownloadDoc[]>([]);
+  const [dlLoading, setDlLoading] = useState(false);
+  const refreshDownloads = useCallback(async () => {
+    setDlLoading(true);
+    try {
+      setDlDocs(await listDownloads());
+    } catch {
+      setDlDocs([]);
+    } finally {
+      setDlLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    const onDl = () => { refreshDownloads(); };
+    window.addEventListener(DOWNLOADS_CHANGED_EVENT, onDl);
+    return () => window.removeEventListener(DOWNLOADS_CHANGED_EVENT, onDl);
+  }, [refreshDownloads]);
 
   const refreshR2 = useCallback(async (prefix: string) => {
     setR2Loading(true);
@@ -122,13 +151,20 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
   }, []);
 
   const key = normExplorerKey(path);
-  const dir = FS[key];
+  const inDownloads = !inR2 && key === DOWNLOADS_KEY;
+  const dir = inDownloads ? { folders: [] as string[], files: [] as FEntry[] } : FS[key];
   const folders = dir?.folders ?? [];
   const files = dir?.files ?? [];
   const goTo = (p: string) => {
     const r2 = parseR2Path(p);
     if (r2 !== null) { enterR2(r2); return; }
     const k = normExplorerKey(p);
+    if (k === DOWNLOADS_KEY) {
+      setR2Prefix(null);
+      setPath(DOWNLOADS_KEY); setInput(DOWNLOADS_KEY); setSelected(null);
+      refreshDownloads();
+      return;
+    }
     if ((FS as any)[k]) {
       setR2Prefix(null);
       setPath(k); setInput(k); setSelected(null);
@@ -144,6 +180,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
       enterR2(parts.length ? parts.join("/") + "/" : "");
       return;
     }
+    if (inDownloads) { goTo("C:\\Wenge"); return; }
     if (key === "C:\\") return;
     const parts = key.split("\\").filter(Boolean);
     parts.pop();
@@ -208,6 +245,40 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
     }
   };
 
+  // --- R2 download (asks machine vs Wenge) ---
+  const onDownloadSelected = () => {
+    if (r2Prefix === null || !selected || !selected.startsWith("r2f:")) return;
+    const k = selected.slice(4);
+    const f = r2Files.find((x) => x.key === k);
+    if (!f) return;
+    const name = r2NameOfKey(f.key);
+    handleDownload({ name, mime: guessMime(name), url: f.url, sourceR2Key: f.key });
+  };
+
+  // --- Downloads (IndexedDB virtual folder) actions ---
+  const onDeleteDownloadSelected = async () => {
+    if (!selected || !selected.startsWith("dl:")) return;
+    const id = selected.slice(3);
+    const doc = dlDocs.find((d) => d.id === id);
+    const ok = await showConfirm("Explorer", `Delete '${doc?.name ?? id}' from Downloads?\nThis cannot be undone.`, "Delete", "Cancel");
+    if (!ok) return;
+    try {
+      await deleteDownload(id);
+      setSelected(null);
+      await refreshDownloads();
+    } catch (e: any) {
+      showError("Explorer", e?.message || "Delete failed.");
+    }
+  };
+
+  const startDownloadDrag = (e: React.DragEvent, doc: DownloadDoc) => {
+    // Blob URLs are fetchable, so the Desktop drop handler can copy them as-is.
+    const url = URL.createObjectURL(doc.blob);
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    const name = doc.name.split("/").pop() || doc.name;
+    startDrag(e, { kind: "file", key: `downloads/${doc.id}/${name}`, name, url, size: doc.size, mime: doc.mime });
+  };
+
   const startDrag = (e: React.DragEvent, item: R2DragItem) => {
     e.dataTransfer.setData(R2_DRAG_MIME, JSON.stringify(item));
     e.dataTransfer.effectAllowed = "copy";
@@ -255,7 +326,19 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={(e) => onUploadFiles(e.target.files)} />
           <Button size="sm" onClick={() => setMkdirOpen((v) => !v)} disabled={!!r2Busy}>New Folder...</Button>
           <Button size="sm" onClick={onDeleteSelected} disabled={!selected || !!r2Busy}>Delete</Button>
+          <Button size="sm" onClick={onDownloadSelected} disabled={!selected?.startsWith("r2f:") || !!r2Busy}>Download...</Button>
           <span style={{ fontSize: 11, color: "#555" }}>{r2Busy ?? (r2Loading ? "Loading..." : "Tip: drag a file onto the Desktop to copy it (saved in IndexedDB).")}</span>
+        </div>
+      )}
+      {inDownloads && (
+        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+          <Button size="sm" onClick={refreshDownloads} disabled={dlLoading}>Refresh</Button>
+          <Button size="sm" onClick={() => {
+            const doc = dlDocs.find((d) => `dl:${d.id}` === selected);
+            if (doc) openDownload(doc);
+          }} disabled={!selected?.startsWith("dl:")}>Open</Button>
+          <Button size="sm" onClick={onDeleteDownloadSelected} disabled={!selected?.startsWith("dl:")}>Delete</Button>
+          <span style={{ fontSize: 11, color: "#555" }}>{dlLoading ? "Loading..." : "Files saved via “Wenge内”. Drag one onto the Desktop to copy it there."}</span>
         </div>
       )}
       {inR2 && mkdirOpen && (
@@ -267,9 +350,9 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
       )}
       <div style={{ display: "flex", gap: 6, height: 200 }}>
         <Frame variant="well" style={{ width: 130, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
-          {[ { label: "My Computer", icon: ICONS.myComputer, target: "C:\\" }, { label: "C: (Wenge)", icon: ICONS.hardDrive, target: "C:\\" }, { label: "Wenge", icon: ICONS.folderClosed, target: "C:\\Wenge" }, { label: "Windows", icon: ICONS.folderClosed, target: "C:\\Windows" }, { label: "R2 File Share", icon: ICONS.fileShare, target: "__r2" }, { label: "Recycle Bin", icon: ICONS.recycle, target: "__recycle" }, { label: "Network", icon: ICONS.network, target: "__network" } ].map((n) => {
+          {[ { label: "My Computer", icon: ICONS.myComputer, target: "C:\\" }, { label: "C: (Wenge)", icon: ICONS.hardDrive, target: "C:\\" }, { label: "Wenge", icon: ICONS.folderClosed, target: "C:\\Wenge" }, { label: "Downloads", icon: ICONS.folderClosed, target: DOWNLOADS_KEY }, { label: "Windows", icon: ICONS.folderClosed, target: "C:\\Windows" }, { label: "R2 File Share", icon: ICONS.fileShare, target: "__r2" }, { label: "Recycle Bin", icon: ICONS.recycle, target: "__recycle" }, { label: "Network", icon: ICONS.network, target: "__network" } ].map((n) => {
             const active = inR2 ? n.target === "__r2" : (n.target !== "__recycle" && n.target !== "__network" && n.target !== "__r2" && normExplorerKey(n.target) === key);
-            return (<div key={n.label} onClick={() => { if (n.target === "__recycle") onOpenApp?.("recycle"); else if (n.target === "__network") onOpenApp?.("network"); else if (n.target === "__r2") enterR2(""); else goTo(n.target); }} style={{ paddingLeft: (n.label === "Wenge" || n.label === "Windows") ? 12 : 0, background: active ? "#000080" : "transparent", color: active ? "#fff" : "#000", display: "flex", alignItems: "center", gap: 4, cursor: "pointer", paddingTop: 2, paddingBottom: 2 }}><img src={n.icon} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {n.label}</div>);
+            return (<div key={n.label} onClick={() => { if (n.target === "__recycle") onOpenApp?.("recycle"); else if (n.target === "__network") onOpenApp?.("network"); else if (n.target === "__r2") enterR2(""); else goTo(n.target); }} style={{ paddingLeft: (n.label === "Wenge" || n.label === "Windows" || n.label === "Downloads") ? 12 : 0, background: active ? "#000080" : "transparent", color: active ? "#fff" : "#000", display: "flex", alignItems: "center", gap: 4, cursor: "pointer", paddingTop: 2, paddingBottom: 2 }}><img src={n.icon} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {n.label}</div>);
           })}
         </Frame>
         <Frame
@@ -291,7 +374,20 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
                 {r2Files.map((f) => {
                   const name = r2NameOfKey(f.key);
                   const sel = selected === `r2f:${f.key}`;
-                  return (<tr key={f.key} draggable onDragStart={(e) => startDrag(e, { kind: "file", key: f.key, name, url: f.url, size: f.size, mime: guessMime(name) })} onClick={() => setSelected(sel ? null : `r2f:${f.key}`)} onDoubleClick={() => window.open(f.url, "_blank", "noopener")} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to open"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>R2 File</td></tr>);
+                  const dl = () => handleDownload({ name, mime: guessMime(name), url: f.url, sourceR2Key: f.key });
+                  return (<tr key={f.key} draggable onDragStart={(e) => startDrag(e, { kind: "file", key: f.key, name, url: f.url, size: f.size, mime: guessMime(name) })} onClick={() => setSelected(sel ? null : `r2f:${f.key}`)} onDoubleClick={dl} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to download"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>R2 File</td></tr>);
+                })}
+              </tbody>
+            </table>
+          ) : inDownloads ? (
+            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+              <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
+              <tbody>
+                <tr onClick={() => goTo("C:\\Wenge")} onDoubleClick={() => goTo("C:\\Wenge")} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>
+                {dlDocs.map((d) => {
+                  const name = d.name.split("/").pop() || d.name;
+                  const sel = selected === `dl:${d.id}`;
+                  return (<tr key={d.id} draggable onDragStart={(e) => startDownloadDrag(e, d)} onClick={() => setSelected(sel ? null : `dl:${d.id}`)} onDoubleClick={() => openDownload(d)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to open"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(d.size)}</td><td style={{ textAlign: "center" }}>Download</td></tr>);
                 })}
               </tbody>
             </table>
@@ -309,10 +405,13 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           {inR2 && !r2Loading && r2Folders.length === 0 && r2Files.length === 0 && (
             <div style={{ padding: 16, fontSize: 11, color: "#555" }}>{r2Note ?? "Empty folder. Upload files or create a folder — or drop OS files here."}</div>
           )}
+          {inDownloads && !dlLoading && dlDocs.length === 0 && (
+            <div style={{ padding: 16, fontSize: 11, color: "#555" }}>Empty. Files you save via “Wenge内” will appear here.</div>
+          )}
         </Frame>
       </div>
-      <div style={{ fontSize: 11 }}>{inR2 ? `${r2Folders.length + r2Files.length} object(s) · ${formatR2Path(r2Prefix!)}${r2Note ? ` · ${r2Note}` : ""}` : (dir ? (folders.length + files.length) + " object(s)" : "0 object(s)") + ` · ${key}`}</div>
-      <ProgressBar value={inR2 ? (r2Loading ? 50 : 100) : (dir ? 100 : 0)} style={{ height: 10 }} />
+      <div style={{ fontSize: 11 }}>{inR2 ? `${r2Folders.length + r2Files.length} object(s) · ${formatR2Path(r2Prefix!)}${r2Note ? ` · ${r2Note}` : ""}` : inDownloads ? `${dlDocs.length} object(s) · ${DOWNLOADS_KEY}` : (dir ? (folders.length + files.length) + " object(s)" : "0 object(s)") + ` · ${key}`}</div>
+      <ProgressBar value={inR2 ? (r2Loading ? 50 : 100) : inDownloads ? (dlLoading ? 50 : 100) : (dir ? 100 : 0)} style={{ height: 10 }} />
     </div>
   );
 }

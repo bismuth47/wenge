@@ -56,13 +56,13 @@ import { NetworkApp } from "./apps/Network";
 import { CdPlayerApp } from "./apps/CdPlayer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
 import { R2_DRAG_MIME, guessMime, listR2Flat, r2NameOfKey, type R2DragItem } from "./lib/r2";
+import { handleDownload } from "./lib/downloadTarget";
 import {
   deleteDesktopDoc,
   docIconKey,
   docIdFromKey,
   isDocIconKey,
   listDesktopDocs,
-  previewDesktopDoc,
   saveDocFromBlob,
   type DesktopDoc,
 } from "./lib/desktopDocs";
@@ -877,7 +877,10 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         const res=await fetch(item.url);
         if(!res.ok) throw new Error(`download failed: ${res.status}`);
         const blob=await res.blob();
-        const doc=await saveDocFromBlob({ name: item.name, mime: blob.type || item.mime || guessMime(item.name), blob, sourceR2Key: item.key });
+        // Keys synthesized by the Downloads folder ("downloads/<id>/<name>") are
+        // not R2 keys — don't record them as such.
+        const sourceR2Key = item.key.startsWith("downloads/") ? undefined : item.key;
+        const doc=await saveDocFromBlob({ name: item.name, mime: blob.type || item.mime || guessMime(item.name), blob, sourceR2Key });
         setDesktopDocs((prev)=>[doc,...prev]);
         placeDocAt(doc.id,e.clientX,e.clientY);
         playRestore();
@@ -1520,8 +1523,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
               onMouseDown={(e)=> handleIconPointerDown(e, k as AppId)}
               onTouchStart={(e)=> handleIconPointerDown(e, k as AppId)}
               onClick={(e) => { e.stopPropagation(); }}
-              onDoubleClick={(e) => { e.stopPropagation(); previewDesktopDoc(doc); }}
-              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to open, drag to Recycle Bin to delete`}
+              onDoubleClick={(e) => { e.stopPropagation(); handleDownload({ name: doc.name, mime: doc.mime, blob: doc.blob, sourceR2Key: doc.sourceR2Key }); }}
+              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to choose download destination, drag to Recycle Bin to delete`}
             >
               <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
                 <IconImg

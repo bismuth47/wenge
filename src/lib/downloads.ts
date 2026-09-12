@@ -1,4 +1,4 @@
-export type DesktopDoc = {
+export type DownloadDoc = {
   id: string;
   name: string;
   mime: string;
@@ -8,23 +8,23 @@ export type DesktopDoc = {
   blob: Blob;
 };
 
+export const DOWNLOADS_CHANGED_EVENT = "wenge:downloads-changed";
+
 const DB_NAME = "wenge-desktop";
-// Must match downloads.ts: both IDB stores ("docs", "downloads") live in this DB.
 const DB_VERSION = 2;
-const STORE = "docs";
+const STORE = "downloads";
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
+      // Fresh installs may come through here first: ensure both stores exist.
+      if (!db.objectStoreNames.contains("docs")) {
+        db.createObjectStore("docs", { keyPath: "id" });
+      }
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
-      }
-      // Created here too so a fresh DB always has both stores
-      // regardless of which module opens it first.
-      if (!db.objectStoreNames.contains("downloads")) {
-        db.createObjectStore("downloads", { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -57,13 +57,19 @@ function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBReque
   );
 }
 
-export async function saveDocFromBlob(opts: {
+function notifyChanged() {
+  try {
+    window.dispatchEvent(new CustomEvent(DOWNLOADS_CHANGED_EVENT));
+  } catch {}
+}
+
+export async function saveDownload(opts: {
   name: string;
   mime: string;
   blob: Blob;
   sourceR2Key?: string;
-}): Promise<DesktopDoc> {
-  const doc: DesktopDoc = {
+}): Promise<DownloadDoc> {
+  const doc: DownloadDoc = {
     id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     name: opts.name,
     mime: opts.mime,
@@ -73,52 +79,40 @@ export async function saveDocFromBlob(opts: {
     blob: opts.blob,
   };
   await tx("readwrite", (s) => s.put(doc));
+  notifyChanged();
   return doc;
 }
 
-export async function listDesktopDocs(): Promise<DesktopDoc[]> {
+export async function listDownloads(): Promise<DownloadDoc[]> {
   try {
-    const all = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
-    void all;
-  } catch {
-    // ignore probe
-  }
-  try {
-    return await tx<DesktopDoc[]>("readonly", (s) => s.getAll());
+    const all = await tx<DownloadDoc[]>("readonly", (s) => s.getAll());
+    return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   } catch {
     return [];
   }
 }
 
-export async function deleteDesktopDoc(id: string): Promise<void> {
+export async function deleteDownload(id: string): Promise<void> {
   await tx("readwrite", (s) => s.delete(id));
+  notifyChanged();
 }
 
-export function downloadDesktopDoc(doc: DesktopDoc) {
-  const url = URL.createObjectURL(doc.blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = doc.name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
-export function previewDesktopDoc(doc: DesktopDoc) {
+/** Open inside Wenge (preview in a new tab). Object URL is revoked after 60s. */
+export function openDownload(doc: DownloadDoc) {
   const url = URL.createObjectURL(doc.blob);
   window.open(url, "_blank", "noopener");
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export function docIconKey(id: string): string {
-  return `doc:${id}`;
-}
-
-export function isDocIconKey(key: string): boolean {
-  return key.startsWith("doc:");
-}
-
-export function docIdFromKey(key: string): string {
-  return key.slice("doc:".length);
+/** Force a real download to the user's machine via anchor download attribute. */
+export function downloadBlobToMachine(name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  // Sanitize path-ish names ("folder/file") down to a file name for the download attribute
+  a.download = name.split("/").pop() || name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }

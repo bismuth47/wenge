@@ -57,9 +57,23 @@ export async function presignUpload(key: string, contentType: string): Promise<{
 export async function uploadToR2(prefix: string, file: File): Promise<string> {
   const p = normalizePrefix(prefix);
   const key = `${p}${file.name}`;
-  const { url } = await presignUpload(key, file.type || "application/octet-stream");
-  const put = await fetch(url, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
-  if (!put.ok) throw new Error(`upload failed: ${put.status}`);
+  let url: string;
+  try {
+    ({ url } = await presignUpload(key, file.type || "application/octet-stream"));
+  } catch (e: any) {
+    throw new Error(`upload failed at presign step: ${e?.message || e}`);
+  }
+  try {
+    const put = await fetch(url, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+    if (!put.ok) throw new Error(`PUT ${put.status}`);
+  } catch (e: any) {
+    if (e instanceof TypeError) {
+      throw new Error(
+        "upload failed at PUT step (network/CORS): browser could not reach R2. Check the bucket CORS policy."
+      );
+    }
+    throw new Error(`upload failed at PUT step: ${e?.message || e}`);
+  }
   return key;
 }
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
-import { listR2, normalizePrefix, uploadToR2, type R2File } from "../lib/r2";
+import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, type R2File } from "../lib/r2";
+import { handleDownload } from "../lib/downloadTarget";
 
 type FileItem = R2File;
 
@@ -118,7 +119,7 @@ export function FileShareApp() {
                     {f.url === "#" ? (
                       <span style={{ fontSize: 10, color: "#808080" }}>Folder</span>
                     ) : (
-                      <Button size="sm" onClick={() => window.open(f.url, "_blank")}>
+                      <Button size="sm" onClick={() => handleDownload({ name: r2NameOfKey(f.key), mime: guessMime(f.key), url: f.url, sourceR2Key: f.key })}>
                         Open
                       </Button>
                     )}

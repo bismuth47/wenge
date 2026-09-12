@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button, Checkbox, Fieldset, Radio, Select, Slider } from "react95";
 import { getSoundEnabled, setSoundEnabled, SOUNDS } from "../hooks/useSound";
 import { showInfo } from "../components/SystemDialog";
+import { DL_TARGET_EVENT, getDownloadSetting, setDownloadSetting, type DownloadSetting } from "../lib/downloadTarget";
 
 export function ControlPanelApp() {
   const [bg, setBg] = useState(() => {
@@ -11,6 +12,12 @@ export function ControlPanelApp() {
   const [volume, setVolume] = useState(70);
   const [soundEnabled, setSoundEnabledState] = useState(() => getSoundEnabled());
   useEffect(() => { setSoundEnabled(soundEnabled); }, [soundEnabled]);
+  const [dlTarget, setDlTarget] = useState<DownloadSetting>(() => getDownloadSetting());
+  useEffect(() => {
+    const onDl = (e: Event) => setDlTarget((e as CustomEvent<DownloadSetting>).detail);
+    window.addEventListener(DL_TARGET_EVENT, onDl);
+    return () => window.removeEventListener(DL_TARGET_EVENT, onDl);
+  }, []);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Fieldset label="Display">
@@ -47,6 +54,17 @@ export function ControlPanelApp() {
         </div>
         <div style={{ fontSize: 10, color: "#808080", marginTop: 4 }}>
           デフォルトON。OFFにすると全ての効果音(起動/操作/エラー)がミュートされます。Media Playerの音量は別。
+        </div>
+      </Fieldset>
+
+      <Fieldset label="Downloads">
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <Radio checked={dlTarget === "ask"} onChange={() => setDownloadSetting("ask")} name="dl" value="ask" label="毎回保存先を確認する" />
+          <Radio checked={dlTarget === "machine"} onChange={() => setDownloadSetting("machine")} name="dl" value="machine" label="常にこの実機にダウンロード" />
+          <Radio checked={dlTarget === "wenge"} onChange={() => setDownloadSetting("wenge")} name="dl" value="wenge" label="常にWenge内 (C:\Wenge\Downloads) に保存" />
+        </div>
+        <div style={{ fontSize: 10, color: "#808080", marginTop: 4 }}>
+          Explorer・File Share・デスクトップのファイル保存時に適用されます。
         </div>
       </Fieldset>
 
