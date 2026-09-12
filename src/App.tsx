@@ -17,7 +17,7 @@ import {
   Radio,
 } from "react95";
 import { WindowFrame } from "./components/WindowFrame";
-import { SystemDialogs, showError, showConfirm, showInfo } from "./components/SystemDialog";
+import { SystemDialogs, showConfirm, showInfo } from "./components/SystemDialog";
 import { XpBoot } from "./components/XpBoot";
 import { XpLogin } from "./components/XpLogin";
 import { useClock } from "./hooks/useClock";
