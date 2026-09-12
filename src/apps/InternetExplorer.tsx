@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95";
+import { handleDownload } from "../lib/downloadTarget";
 
 const QUICK_LINKS = [
   "https://www.bing.com/",
@@ -44,6 +45,28 @@ function toWikipediaUrl(query: string): string {
   return `https://ja.wikipedia.org/w/index.php?search=${encodeURIComponent(query.trim())}&ns0=1`;
 }
 
+function fileNameForSave(pageUrl: string, disposition: string | null): string {
+  // Prefer the server's suggested filename when present
+  if (disposition) {
+    const m = disposition.match(/filename\*?=(?:UTF-8''|")?([^";\n]+)/i);
+    if (m) {
+      try {
+        const decoded = decodeURIComponent(m[1].replace(/^"|"$/g, "").trim());
+        if (decoded) return decoded;
+      } catch {}
+    }
+  }
+  try {
+    const u = new URL(pageUrl);
+    const base = u.pathname.split("/").filter(Boolean).pop() || "";
+    if (base && base.includes(".")) return base;
+    if (base) return `${base}.html`;
+    return `${u.hostname}.html`;
+  } catch {
+    return "download.html";
+  }
+}
+
 type BlockInfo = { query: string; code: string | null; email: string | null; originalUrl: string };
 
 export function InternetExplorerApp() {
@@ -59,6 +82,7 @@ export function InternetExplorerApp() {
   const [probeInfo, setProbeInfo] = useState<string | null>(null);
   const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const probeAbortRef = useRef<AbortController | null>(null);
@@ -279,6 +303,54 @@ export function InternetExplorerApp() {
     if (e.key === "Enter") navigateTo(address);
   };
 
+  // Save the current page / linked file via the download destination choice
+  // (real machine vs C:\Wenge\Downloads). Always fetched through /api/proxy
+  // so it works regardless of the target site's CORS policy.
+  const handleSave = async () => {
+    const target = currentUrl || address.trim();
+    if (!target) {
+      setError("保存するページを開いてください。");
+      return;
+    }
+    const pageUrl = isProbablyUrl(target) ? normalizeUrl(target) : null;
+    if (!pageUrl) {
+      setError("保存できるURLではありません。ファイルのURLを開いてから保存してください。");
+      return;
+    }
+    setSaving(true);
+    setStatusText(`Saving ${pageUrl}...`);
+    try {
+      const res = await fetch(`/api/proxy?url=${encodeURIComponent(pageUrl)}`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        let msg = `保存に失敗しました (HTTP ${res.status})`;
+        try {
+          const j = JSON.parse(body);
+          if (j?.error) msg = `保存に失敗しました: ${j.error}`;
+        } catch {}
+        setError(msg);
+        setStatusText("Save failed");
+        return;
+      }
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        // Proxy returns JSON for bot-blocked pages etc. — not a saveable file
+        setError("このページは保存できません（プロキシがブロックを検出）。");
+        setStatusText("Save failed");
+        return;
+      }
+      const blob = await res.blob();
+      const name = fileNameForSave(pageUrl, res.headers.get("content-disposition"));
+      setStatusText(`Document done: ${pageUrl}`);
+      await handleDownload({ name, mime: blob.type || "application/octet-stream", blob, url: pageUrl });
+    } catch (e: any) {
+      setError(`保存に失敗しました: ${e?.message || String(e)}`);
+      setStatusText("Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleIframeLoad = () => {
     setLoading(false);
     // Detect JSON bot-block rendered inside iframe (fallback for race)
@@ -388,6 +460,7 @@ export function InternetExplorerApp() {
         <Button size="sm" onClick={handleStop} disabled={!loading}>Stop</Button>
         <TextInput value={address} onChange={(e) => setAddress(e.target.value)} onKeyDown={handleAddressKeyDown} placeholder="URL または検索ワード (例: wenge / example.com)" style={{ flex: 1, minWidth: 160 }} />
         <Button onClick={handleGo} disabled={loading}>Go</Button>
+        <Button size="sm" onClick={handleSave} disabled={saving || (!currentUrl && !address.trim())} title="このページ/ファイルを保存（保存先を選択）">保存...</Button>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
