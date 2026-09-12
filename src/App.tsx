@@ -17,6 +17,8 @@ import {
   Radio,
 } from "react95";
 import { WindowFrame } from "./components/WindowFrame";
+import { XpBoot } from "./components/XpBoot";
+import { XpLogin } from "./components/XpLogin";
 import { useClock } from "./hooks/useClock";
 import { SOUNDS, useSound } from "./hooks/useSound";
 import { useAnimatedCursor } from "./hooks/useAnimatedCursor";
@@ -514,6 +516,7 @@ export default function App() {
   // playNav はアプリ起動時の音を無効化したため未使用
   // const playNav = useSound(SOUNDS.navigation, 0.4);
   const playError = useSound(SOUNDS.error, 0.5);
+  const playRecycle = useSound(SOUNDS.recycle, 0.5);
 
   const [windows, setWindows] = useState<WinState[]>(() =>
     (Object.keys(APP_DEFS) as AppId[]).map((id, idx) => ({
@@ -544,36 +547,101 @@ const longPressTimer=useRef<number|null>(null);
 const [startOpen, setStartOpen] = useState(false);
 const [programsOpen, setProgramsOpen] = useState(false);
 const [showBsod, setShowBsod] = useState(false);
+  // XP-style boot -> login -> desktop phases. Reload always restarts from "boot" (no persistence by design).
+  const [phase, setPhase] = useState<"boot" | "login" | "desktop">("boot");
 const maxZ = useRef(20);
 const [startupPlayed, setStartupPlayed] = useState(false);
-const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; icon: string; iconSrc: string }[]>([
-  { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
-  { id: "recycle", label: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
-  { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
-  { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
-  { id: "help", label: "Help", icon: ICON_FALLBACK.help, iconSrc: ICONS.help },
-]);
-const [draggingFromStart, setDraggingFromStart] = useState<{id: AppId; label: string; iconSrc: string} | null>(null);
+const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; icon: string; iconSrc: string }[]>(()=>{
+  const fallback=[
+    { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
+    { id: "recycle", label: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
+    { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
+    { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
+    { id: "help", label: "Help", icon: ICON_FALLBACK.help, iconSrc: ICONS.help },
+  ] as { id: AppId; label: string; icon: string; iconSrc: string }[];
+  try{
+    const saved=localStorage.getItem("wenge_desktop_icons");
+    if(saved){
+      const parsed=JSON.parse(saved);
+      if(Array.isArray(parsed)){
+        const valid=parsed.filter((ic:any)=> ic && typeof ic.id==="string" && (APP_DEFS as Record<string,any>)[ic.id]);
+        if(valid.length>0) return valid.map((ic:any)=>{
+          const def=(APP_DEFS as Record<string,any>)[ic.id];
+          return { id: ic.id as AppId, label: typeof ic.label==="string"?ic.label:def.title, icon: def.icon, iconSrc: typeof ic.iconSrc==="string"?ic.iconSrc:def.iconSrc };
+        });
+      }
+    }
+  }catch{}
+  return fallback;
+});
+const [draggingFromStart, setDraggingFromStart] = useState<{id: AppId; label: string; iconSrc: string; x: number; y: number; dx: number; dy: number} | null>(null);
 
-const isOnDesktop = (id: AppId) => desktopIcons.some(ic => ic.id === id);
-const addToDesktop = (id: AppId) => {
-  if (isOnDesktop(id)) return;
+// グリッドにスナップ
+const snapPos=(x:number,y:number,deskW:number,deskH:number)=>{
+  let nx=Math.max(0, Math.min(x, deskW - ICON_W));
+  let ny=Math.max(0, Math.min(y, deskH - ICON_H));
+  nx=Math.round((nx - 12)/GRID_W)*GRID_W + 12;
+  ny=Math.round((ny - 12)/GRID_H)*GRID_H + 12;
+  nx=Math.max(12, Math.min(nx, deskW - ICON_W - 12));
+  ny=Math.max(12, Math.min(ny, deskH - ICON_H - 12));
+  return {x:nx,y:ny};
+};
+const isSpotFree=(x:number,y:number,occupied:Record<string,{x:number,y:number}>)=>{
+  return !Object.values(occupied).some(p=> Math.abs(p.x-x)<ICON_W && Math.abs(p.y-y)<ICON_H);
+};
+// 新規アイコンの配置先を探す（ドロップ位置優先、重なり回避）
+const findSpotForNew=(wantX:number|undefined,wantY:number|undefined,deskW:number,deskH:number,occupied:Record<string,{x:number,y:number}>)=>{
+  if(wantX!==undefined && wantY!==undefined){
+    const s=snapPos(wantX,wantY,deskW,deskH);
+    if(isSpotFree(s.x,s.y,occupied)) return s;
+    for(let radius=1;radius<=8;radius++){
+      for(let dx=-radius;dx<=radius;dx++){
+        for(let dy=-radius;dy<=radius;dy++){
+          if(Math.abs(dx)!==radius && Math.abs(dy)!==radius) continue;
+          const tx=s.x+dx*GRID_W, ty=s.y+dy*GRID_H;
+          if(tx<12||ty<12||tx>deskW-ICON_W-12||ty>deskH-ICON_H-12) continue;
+          if(isSpotFree(tx,ty,occupied)) return {x:tx,y:ty};
+        }
+      }
+    }
+  }
+  for(let i=0;i<200;i++){
+    const p=getDefaultPos(i,deskW,deskH);
+    if(p.x>deskW-ICON_W-12) break;
+    if(isSpotFree(p.x,p.y,occupied)) return p;
+  }
+  return snapPos(wantX??12,wantY??12,deskW,deskH);
+};
+const desktopSize=()=>{
+  const rect=desktopRef.current?.getBoundingClientRect();
+  return { w: rect?.width ?? window.innerWidth, h: (rect?.height ?? window.innerHeight) - 30 };
+};
+// スタートメニューからのドロップでショートカット作成（既存アイコンの配置は保持する）
+const addToDesktop = (id: AppId, opts?: {label?:string; iconSrc?:string; x?:number; y?:number}) => {
+  if(!APP_DEFS[id]) return;
+  if(desktopIcons.some(ic=>ic.id===id)) return;
   const def = APP_DEFS[id];
-  const w=window.innerWidth, h=window.innerHeight-30;
-  const newIcons = [...desktopIcons, { id, label: def.title, icon: def.icon, iconSrc: def.iconSrc }];
-  setDesktopIcons(newIcons);
-  // Set position using existing logic
-  const pos:Record<string,{x:number,y:number}>={};
-  newIcons.forEach((ic,i)=> pos[ic.id]=getDefaultPos(i,w,h));
-  pos["run"]=getDefaultPos(newIcons.length,w,h);
-  setIconPos(pos);
+  const {w,h}=desktopSize();
+  const pos=findSpotForNew(opts?.x,opts?.y,w,h,iconPos);
+  setDesktopIcons(prev=> prev.some(ic=>ic.id===id)?prev:[...prev,{id,label:opts?.label??def.title,icon:def.icon,iconSrc:opts?.iconSrc??def.iconSrc}]);
+  setIconPos(prev=>({...prev,[id]:pos}));
 };
 const removeFromDesktop = (id: AppId) => {
-  const newIcons = desktopIcons.filter(ic => ic.id !== id);
-  setDesktopIcons(newIcons);
-  const newPos = {...iconPos};
-  delete newPos[id];
-  setIconPos(newPos);
+  // ごみ箱・Run自体は削除不可
+  if(id==="recycle"||id==="run"){ playError(); return; }
+  if(!desktopIcons.some(ic=>ic.id===id)) return;
+  setDesktopIcons(prev=>prev.filter(ic=>ic.id!==id));
+  setIconPos(prev=>{ const n={...prev}; delete n[id]; return n; });
+  setSelectedIds(prev=>{ if(!prev.has(id)) return prev; const n=new Set(prev); n.delete(id); return n; });
+  playRecycle();
+};
+// カーソル位置がごみ箱アイコン上かどうか
+const isOverRecycleAt=(clientX:number,clientY:number)=>{
+  const rect=desktopRef.current?.getBoundingClientRect();
+  const rp=iconPos["recycle"];
+  if(!rect||!rp) return false;
+  const x=clientX-rect.left, y=clientY-rect.top;
+  return x>=rp.x && x<=rp.x+ICON_W && y>=rp.y && y<=rp.y+ICON_H;
 };
 
   // Initialize icon positions
@@ -597,6 +665,11 @@ const removeFromDesktop = (id: AppId) => {
     localStorage.setItem("wenge_icon_pos", JSON.stringify(iconPos));
   },[iconPos]);
 
+  // デスクトップ構成（ショートカット追加／削除）を永続化
+  useEffect(()=>{
+    try{ localStorage.setItem("wenge_desktop_icons", JSON.stringify(desktopIcons)); }catch{}
+  },[desktopIcons]);
+
   const autoArrange=()=>{
     const w=window.innerWidth, h=window.innerHeight-30;
     const pos:Record<string,{x:number,y:number}>={};
@@ -607,12 +680,12 @@ const removeFromDesktop = (id: AppId) => {
     localStorage.setItem("wenge_icon_pos", JSON.stringify(pos));
   };
 
+  // Startup sound plays once the desktop unlocks (login click counts as the user gesture)
   useEffect(() => {
-    if (!startupPlayed) {
-      const t = setTimeout(() => { playStartup(); setStartupPlayed(true); }, 400);
-      return () => clearTimeout(t);
-    }
-  }, [playStartup, startupPlayed]);
+    if (phase !== "desktop" || startupPlayed) return;
+    const t = setTimeout(() => { playStartup(); setStartupPlayed(true); }, 400);
+    return () => clearTimeout(t);
+  }, [playStartup, startupPlayed, phase]);
 
   useEffect(() => {
     const clampWindows = () => {
@@ -767,12 +840,11 @@ const removeFromDesktop = (id: AppId) => {
     e.stopPropagation();
     const clientX = e.clientX;
     const clientY = e.clientY;
-    const rect = desktopRef.current?.getBoundingClientRect();
-    if(!rect) return;
-    const offsetX = clientX - rect.left;
-    const offsetY = clientY - rect.top;
-    setDraggingFromStart({id, label, iconSrc});
-    setDragging({id, offsetX, offsetY, startX: clientX, startY: clientY, hasMoved:false});
+    setStartOpen(false);
+    setProgramsOpen(false);
+    // つかんでいるアイコンがカーソルの真ん中に来るようオフセットを取る
+    setDraggingFromStart({id, label, iconSrc, x: clientX, y: clientY, dx: 40, dy: 30});
+    setDragging({id, offsetX: 40, offsetY: 30, startX: clientX, startY: clientY, hasMoved:false});
   };
 
   const handleDesktopMouseDown = (e: React.MouseEvent) => {
@@ -810,6 +882,17 @@ const removeFromDesktop = (id: AppId) => {
   };
 
   const handleDesktopMouseMove = (e: React.MouseEvent) => {
+    setHoverPos({x:e.clientX,y:e.clientY});
+    // スタートメニューからのドラッグゴーストを追従
+    if(draggingFromStart){
+      setDraggingFromStart(prev=> prev?{...prev, x: e.clientX, y: e.clientY}:prev);
+      if(dragging){
+        const dx=e.clientX - dragging.startX;
+        const dy=e.clientY - dragging.startY;
+        if(Math.abs(dx)>3 || Math.abs(dy)>3) dragging.hasMoved=true;
+      }
+      return;
+    }
     if(dragging){
       const rect=desktopRef.current?.getBoundingClientRect();
       if(!rect) return;
@@ -903,28 +986,72 @@ const removeFromDesktop = (id: AppId) => {
     }
   };
 
+  // ホバー中のカーソル位置（ゴミ箱ハイライト用。デスクトップドラッグ＋スタートメニュードラッグ両対応）
+  const [hoverPos,setHoverPos]=useState<{x:number;y:number}|null>(null);
+  // ゴミ箱アイコン上へドラッグ中はハイライトする
+  const draggingOverRecycle = draggingFromStart
+    ? (hoverPos ? isOverRecycleAt(hoverPos.x, hoverPos.y) : isOverRecycleAt(draggingFromStart.x, draggingFromStart.y))
+    : !!(dragging && dragging.hasMoved && hoverPos && iconPos[dragging.id] && isOverRecycleAt(hoverPos.x, hoverPos.y));
+
   const handleDesktopMouseUp = (e: React.MouseEvent) => {
     if(longPressTimer.current){ clearTimeout(longPressTimer.current); longPressTimer.current=null; }
     if(dragging && !dragging.hasMoved){
       // click without move already handled selection
     }
-    
-    // Check for drop on recycle bin
-    const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
-    const dropTargetWindow = dropTarget?.closest('[data-window-id]');
-    const dropTargetWindowId = dropTargetWindow?.getAttribute('data-window-id');
-    
-    // If dropped on a window and it's the recycle bin, remove the dragged icon
-    if(dragging && dropTargetWindowId === 'recycle'){
-      removeFromDesktop(dragging.id as AppId);
+
+    // スタートメニューからドラッグ中のドロップ → デスクトップにショートカット作成
+    if(draggingFromStart && dragging?.hasMoved){
+      const rect=desktopRef.current?.getBoundingClientRect();
+      // タスクバー帯（下端30px相当）を除外
+      const inDesktop=!!rect && e.clientX>=rect.left && e.clientX<=rect.right && e.clientY>=rect.top && e.clientY<=rect.bottom-30;
+      const overRecycle=isOverRecycleAt(e.clientX,e.clientY);
+      const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
+      const dropWin = dropTarget?.closest('[data-window-id]');
+      const dropWinId = dropWin?.getAttribute('data-window-id');
+      const onStartMenu = !!dropTarget?.closest('[data-start-menu]');
+      if(inDesktop && !overRecycle && dropWinId!=='recycle' && !onStartMenu && rect){
+        if(desktopIcons.some(ic=>ic.id===draggingFromStart.id)) playError();
+        else addToDesktop(draggingFromStart.id, { label:draggingFromStart.label, iconSrc:draggingFromStart.iconSrc, x:e.clientX-rect.left-40, y:e.clientY-rect.top-30 });
+      }
+      setDraggingFromStart(null);
+      setDragging(null);
+      setMultiDrag(null);
+      setHoverPos(null);
+      setSelectionRect(null);
+      return;
     }
-    // If dropped from start menu, add to desktop
-    else if(draggingFromStart){
-      addToDesktop(draggingFromStart.id as AppId);
+    if(draggingFromStart){
+      // 移動なし（ただのクリック）→ 従来どおりアプリを開く
+      const id=draggingFromStart.id;
+      setDraggingFromStart(null);
+      setDragging(null);
+      setMultiDrag(null);
+      setHoverPos(null);
+      setSelectionRect(null);
+      openWindow(id, { silent: true });
+      return;
+    }
+
+    // デスクトップアイコンのドラッグ → ゴミ箱アイコン上ならデスクトップから削除
+    if(dragging && dragging.hasMoved){
+      const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
+      const dropWin = dropTarget?.closest('[data-window-id]');
+      const dropWinId = dropWin?.getAttribute('data-window-id');
+      if(dropWinId === 'recycle' || isOverRecycleAt(e.clientX, e.clientY)){
+        // ドラッグしたアイコン＋範囲選択されたアイコンをまとめて削除
+        const ids=new Set<AppId>([dragging.id as AppId, ...selectedIds]);
+        setDragging(null);
+        setMultiDrag(null);
+        setHoverPos(null);
+        setSelectionRect(null);
+        ids.forEach(id=>removeFromDesktop(id));
+        return;
+      }
     }
     
     setDragging(null);
     setMultiDrag(null);
+    setHoverPos(null);
     if(selectionRect){
       // ラバーバンド選択直後の Desktop onClick で選択がクリアされるのを防ぐ
       suppressDesktopClick.current=true;
@@ -1001,17 +1128,30 @@ const removeFromDesktop = (id: AppId) => {
   };
   const handleTouchEnd=(e: React.TouchEvent)=>{
     if(longPressTimer.current){ clearTimeout(longPressTimer.current); longPressTimer.current=null; }
-    
-    // Check for drop on recycle bin or start menu item drop
+
     const touch = e.changedTouches[0];
-    const dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
-    const dropTargetWindow = dropTarget?.closest('[data-window-id]');
-    const dropTargetWindowId = dropTargetWindow?.getAttribute('data-window-id');
-    
-    if(dragging && dropTargetWindowId === 'recycle'){
-      removeFromDesktop(dragging.id as AppId);
-    } else if(draggingFromStart){
-      addToDesktop(draggingFromStart.id as AppId);
+    if(draggingFromStart && dragging?.hasMoved){
+      const rect=desktopRef.current?.getBoundingClientRect();
+      const inDesktop=!!rect && touch.clientX>=rect.left && touch.clientX<=rect.right && touch.clientY>=rect.top && touch.clientY<=rect.bottom;
+      if(inDesktop && !isOverRecycleAt(touch.clientX,touch.clientY) && rect){
+        addToDesktop(draggingFromStart.id,{label:draggingFromStart.label,iconSrc:draggingFromStart.iconSrc,x:touch.clientX-rect.left-40,y:touch.clientY-rect.top-30});
+      }
+      setDraggingFromStart(null);
+      setDragging(null); setMultiDrag(null);
+      return;
+    }
+    if(draggingFromStart){
+      const id=draggingFromStart.id;
+      setDraggingFromStart(null);
+      setDragging(null); setMultiDrag(null);
+      openWindow(id,{silent:true});
+      return;
+    }
+    if(dragging && dragging.hasMoved && isOverRecycleAt(touch.clientX,touch.clientY)){
+      const id=dragging.id;
+      setDragging(null); setMultiDrag(null);
+      removeFromDesktop(id as AppId);
+      return;
     }
     
     setDragging(null); setMultiDrag(null);
@@ -1022,6 +1162,15 @@ const removeFromDesktop = (id: AppId) => {
     setContextMenu({x:e.clientX, y:e.clientY});
   };
 
+  // --- XP boot / login gate (spec: show XP startup screen on open, password 4747 to enter) ---
+  // Shutdown / Log off keeps the reload behavior, so a reload always restarts from boot.
+  if (phase === "boot") {
+    return <XpBoot onDone={() => setPhase("login")} />;
+  }
+  if (phase === "login") {
+    return <XpLogin onSuccess={() => setPhase("desktop")} />;
+  }
+
   return (
     <Desktop
       ref={desktopRef}
@@ -1029,6 +1178,7 @@ const removeFromDesktop = (id: AppId) => {
       onMouseDown={handleDesktopMouseDown}
       onMouseMove={handleDesktopMouseMove}
       onMouseUp={handleDesktopMouseUp}
+      onMouseLeave={handleDesktopMouseUp}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onContextMenu={handleDesktopContextMenu}
@@ -1037,17 +1187,21 @@ const removeFromDesktop = (id: AppId) => {
         {desktopIcons.map((ic) => {
           const pos=iconPos[ic.id] || getDefaultPos(0, window.innerWidth, window.innerHeight);
           const selected=selectedIds.has(ic.id);
+          // ゴミ箱へドラッグ中のハイライト（選択色を反転気味に）
+          const recycleHL = ic.id==="recycle" && draggingOverRecycle;
+          const hlSelected = selected || recycleHL;
           return (
             <Icon
               key={ic.id}
               data-icon
-              $selected={selected}
+              $selected={hlSelected}
               $x={pos.x}
               $y={pos.y}
               onMouseDown={(e)=> handleIconPointerDown(e, ic.id)}
               onTouchStart={(e)=> handleIconPointerDown(e, ic.id)}
               onClick={(e) => { e.stopPropagation(); }}
               onDoubleClick={(e) => { e.stopPropagation(); openWindow(ic.id, { silent: true }); }}
+              title={recycleHL ? "ここにドロップで削除" : undefined}
             >
               <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
                 <IconImg
@@ -1087,6 +1241,17 @@ const removeFromDesktop = (id: AppId) => {
         })()}
         {selectionRect && (
           <SelectionRect $x={Math.min(selectionRect.x0,selectionRect.x1)} $y={Math.min(selectionRect.y0,selectionRect.y1)} $w={Math.abs(selectionRect.x1-selectionRect.x0)} $h={Math.abs(selectionRect.y1-selectionRect.y0)} />
+        )}
+        {/* スタートメニューからのドラッグゴースト */}
+        {draggingFromStart && dragging?.hasMoved && (
+          <div style={{ position:"absolute", left:draggingFromStart.x-(desktopRef.current?.getBoundingClientRect().left??0)-40, top:draggingFromStart.y-(desktopRef.current?.getBoundingClientRect().top??0)-30, width:ICON_W, pointerEvents:"none", opacity:0.8, zIndex:9999 }}>
+            <div style={{ width:80, height:84, display:"flex", flexDirection:"column", alignItems:"center" }}>
+              <div style={{ width:32, height:32, display:"grid", placeItems:"center" }}>
+                <img src={draggingFromStart.iconSrc} alt="" width={32} height={32} style={{ imageRendering:"pixelated" as const }} draggable={false} />
+              </div>
+              <div style={{ marginTop:4, color:"#fff", fontSize:11, textAlign:"center", lineHeight:1.2, maxHeight:40, overflow:"hidden", background:"#000080", padding:"1px 3px" }}>{draggingFromStart.label}</div>
+            </div>
+          </div>
         )}
       </IconsLayer>
 
