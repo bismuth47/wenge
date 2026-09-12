@@ -533,12 +533,12 @@ export default function App() {
   );
   // Icon positions with localStorage persistence
 const desktopRef=useRef<HTMLDivElement>(null);
-const lastTouchRef=useRef<{x:number,y:number}|null>(null);
 const [iconPos, setIconPos]=useState<Record<string,{x:number,y:number}>>({});
 const [selectedIds,setSelectedIds]=useState<Set<AppId>>(new Set());
 const [dragging,setDragging]=useState<{id:AppId, offsetX:number, offsetY:number, startX:number, startY:number, hasMoved:boolean}|null>(null);
 const [multiDrag, setMultiDrag]=useState<Record<string,{x:number,y:number}>|null>(null);
 const [selectionRect,setSelectionRect]=useState<{x0:number,y0:number,x1:number,y1:number}|null>(null);
+const suppressDesktopClick=useRef(false);
 const [contextMenu,setContextMenu]=useState<{x:number,y:number}|null>(null);
 const longPressTimer=useRef<number|null>(null);
 const [startOpen, setStartOpen] = useState(false);
@@ -899,7 +899,7 @@ const removeFromDesktop = (id: AppId) => {
         const p=iconPos["run"];
         if(p.x < right && p.x+ICON_W > left && p.y < bottom && p.y+ICON_H > top) sel.add("run" as AppId);
       }
-      if(sel.size>0) setSelectedIds(sel);
+      setSelectedIds(sel);
     }
   };
 
@@ -925,6 +925,10 @@ const removeFromDesktop = (id: AppId) => {
     
     setDragging(null);
     setMultiDrag(null);
+    if(selectionRect){
+      // ラバーバンド選択直後の Desktop onClick で選択がクリアされるのを防ぐ
+      suppressDesktopClick.current=true;
+    }
     setSelectionRect(null);
   };
 
@@ -1021,7 +1025,7 @@ const removeFromDesktop = (id: AppId) => {
   return (
     <Desktop
       ref={desktopRef}
-      onClick={() => { setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setContextMenu(null); }}
+      onClick={() => { if(suppressDesktopClick.current){ suppressDesktopClick.current=false; return; } setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setContextMenu(null); }}
       onMouseDown={handleDesktopMouseDown}
       onMouseMove={handleDesktopMouseMove}
       onMouseUp={handleDesktopMouseUp}
@@ -1178,7 +1182,7 @@ const removeFromDesktop = (id: AppId) => {
                 <div style={{ flex: 1, position:"relative" }}>
                   {/* Programs with cascading submenu */}
                   <div onMouseEnter={()=>setProgramsOpen(true)} onMouseLeave={()=>setProgramsOpen(false)} style={{ position:"relative" }}>
-                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", fontSize:11, cursor: "url('/cursors/arrow.png') 0 0, default" }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "my-computer", "Programs", ICONS.myComputer as any) }}>
+                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", fontSize:11, cursor: "url('/cursors/arrow.png') 0 0, default" }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "my-computer", "Programs", ICONS.myComputer as any)}>
                       <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />
                       Programs <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                     </MenuListItem>
