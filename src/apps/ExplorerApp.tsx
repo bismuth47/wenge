@@ -22,6 +22,9 @@ import {
   type DownloadDoc,
 } from "../lib/downloads";
 import { handleDownload } from "../lib/downloadTarget";
+import { deleteVfsFile, useVfsDirectory } from "../lib/vfs/store";
+import { setPendingVfsFile, vfsOpenTarget } from "../lib/vfs/openWith";
+import { fromExplorerPath, normalizeVfsPath } from "../lib/vfs/path";
 
 export type ExplorerOpenId = "notepad"|"wordpad"|"paint"|"calc"|"clock"|"msdos"|"minesweeper"|"solitaire"|"freecell"|"hearts"|"media-player"|"cd-player"|"sound-recorder"|"volume"|"control"|"help"|"find"|"recycle"|"network"|"my-computer"|string;
 
@@ -73,8 +76,10 @@ export function formatR2Path(prefix: string): string {
   return "R2:\\" + p.replace(/\//g, "\\").replace(/\\$/, "");
 }
 
-/** Virtual download folder backed by IndexedDB (see src/lib/downloads.ts). */
+/** Virtual download folder backed by the VFS IndexedDB store. */
 export const DOWNLOADS_KEY = "C:\\Wenge\\Downloads";
+export const DESKTOP_KEY = "C:\\Desktop";
+export const DOCUMENTS_KEY = "C:\\Documents";
 
 function formatSize(bytes: number): string {
   if (!bytes) return "0 KB";
@@ -152,17 +157,53 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
 
   const key = normExplorerKey(path);
   const inDownloads = !inR2 && key === DOWNLOADS_KEY;
-  const dir = inDownloads ? { folders: [] as string[], files: [] as FEntry[] } : FS[key];
+  // C:/Desktop と C:/Documents はVFS実データで表示（永続化・デスクトップ連動）
+  const vfsPath = !inR2 ? normalizeVfsPath(fromExplorerPath(key)) : null;
+  const isVfsDir = !inR2 && !!vfsPath && (vfsPath.toLowerCase() === "c:/desktop" || vfsPath.toLowerCase() === "c:/documents" || vfsPath.toLowerCase() === "c:/wenge/downloads");
+  const { files: vfsFiles, loading: vfsLoading, refresh: refreshVfs } = useVfsDirectory(!inR2 && isVfsDir && vfsPath ? vfsPath : "C:/Desktop");
+  const dir = inDownloads || isVfsDir ? { folders: [] as string[], files: [] as FEntry[] } : FS[key];
   const folders = dir?.folders ?? [];
   const files = dir?.files ?? [];
+  const openVfsEntry = (id: string) => {
+    const f = vfsFiles.find((x) => x.id === id);
+    if (!f) return;
+    const target = vfsOpenTarget(f);
+    if (target === "preview" || target === "explorer") {
+      const url = URL.createObjectURL(f.blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return;
+    }
+    const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : "media-player";
+    setPendingVfsFile(f);
+    // App.tsx側でvfsFileByAppにDesktopDocしか渡せないため、Downloads/Documentsからの
+    // オープンはpending経由（マウント時にconsume）で対応する
+    try {
+      (window as any).__wengePendingVfs = f;
+    } catch {}
+    onOpenApp?.(appId);
+  };
+  const deleteVfsEntry = async (id: string) => {
+    const f = vfsFiles.find((x) => x.id === id);
+    const ok = await showConfirm("Explorer", `Delete '${f?.name ?? id}'?\nThis cannot be undone.`, "Delete", "Cancel");
+    if (!ok) return;
+    try {
+      await deleteVfsFile(id);
+      setSelected(null);
+      refreshVfs();
+    } catch (e: any) {
+      showError("Explorer", e?.message || "Delete failed.");
+    }
+  };
   const goTo = (p: string) => {
     const r2 = parseR2Path(p);
     if (r2 !== null) { enterR2(r2); return; }
     const k = normExplorerKey(p);
-    if (k === DOWNLOADS_KEY) {
+    // C:/Desktop | C:/Documents | C:/Wenge/Downloads はVFS実データ
+    if (k === DESKTOP_KEY || k === DOCUMENTS_KEY || k === DOWNLOADS_KEY) {
       setR2Prefix(null);
-      setPath(DOWNLOADS_KEY); setInput(DOWNLOADS_KEY); setSelected(null);
-      refreshDownloads();
+      setPath(k); setInput(k); setSelected(null);
+      if (k === DOWNLOADS_KEY) refreshDownloads();
       return;
     }
     if ((FS as any)[k]) {
@@ -181,6 +222,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
       return;
     }
     if (inDownloads) { goTo("C:\\Wenge"); return; }
+    if (isVfsDir) { goTo("C:\\Wenge"); return; }
     if (key === "C:\\") return;
     const parts = key.split("\\").filter(Boolean);
     parts.pop();
@@ -330,6 +372,14 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           <span style={{ fontSize: 11, color: "#555" }}>{r2Busy ?? (r2Loading ? "Loading..." : "Tip: drag a file onto the Desktop to copy it (saved in IndexedDB).")}</span>
         </div>
       )}
+      {isVfsDir && !inDownloads && (
+        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+          <Button size="sm" onClick={() => refreshVfs()} disabled={vfsLoading}>Refresh</Button>
+          <Button size="sm" onClick={() => { const f = vfsFiles.find((x) => `vfs:${x.id}` === selected); if (f) openVfsEntry(f.id); }} disabled={!selected?.startsWith("vfs:")}>Open</Button>
+          <Button size="sm" onClick={() => { const id = (selected ?? "").slice(4); if (selected?.startsWith("vfs:") && id) deleteVfsEntry(id); }} disabled={!selected?.startsWith("vfs:")}>Delete</Button>
+          <span style={{ fontSize: 11, color: "#555" }}>{vfsLoading ? "Loading..." : "VFS (IndexedDB永続). Double-click to open in app."}</span>
+        </div>
+      )}
       {inDownloads && (
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
           <Button size="sm" onClick={refreshDownloads} disabled={dlLoading}>Refresh</Button>
@@ -350,9 +400,9 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
       )}
       <div style={{ display: "flex", gap: 6, height: 200 }}>
         <Frame variant="well" style={{ width: 130, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
-          {[ { label: "My Computer", icon: ICONS.myComputer, target: "C:\\" }, { label: "C: (Wenge)", icon: ICONS.hardDrive, target: "C:\\" }, { label: "Wenge", icon: ICONS.folderClosed, target: "C:\\Wenge" }, { label: "Downloads", icon: ICONS.folderClosed, target: DOWNLOADS_KEY }, { label: "Windows", icon: ICONS.folderClosed, target: "C:\\Windows" }, { label: "R2 File Share", icon: ICONS.fileShare, target: "__r2" }, { label: "Recycle Bin", icon: ICONS.recycle, target: "__recycle" }, { label: "Network", icon: ICONS.network, target: "__network" } ].map((n) => {
+          {[ { label: "My Computer", icon: ICONS.myComputer, target: "C:\\" }, { label: "C: (Wenge)", icon: ICONS.hardDrive, target: "C:\\" }, { label: "Wenge", icon: ICONS.folderClosed, target: "C:\\Wenge" }, { label: "Desktop", icon: ICONS.folderClosed, target: DESKTOP_KEY }, { label: "Documents", icon: ICONS.folderClosed, target: DOCUMENTS_KEY }, { label: "Downloads", icon: ICONS.folderClosed, target: DOWNLOADS_KEY }, { label: "Windows", icon: ICONS.folderClosed, target: "C:\\Windows" }, { label: "R2 File Share", icon: ICONS.fileShare, target: "__r2" }, { label: "Recycle Bin", icon: ICONS.recycle, target: "__recycle" }, { label: "Network", icon: ICONS.network, target: "__network" } ].map((n) => {
             const active = inR2 ? n.target === "__r2" : (n.target !== "__recycle" && n.target !== "__network" && n.target !== "__r2" && normExplorerKey(n.target) === key);
-            return (<div key={n.label} onClick={() => { if (n.target === "__recycle") onOpenApp?.("recycle"); else if (n.target === "__network") onOpenApp?.("network"); else if (n.target === "__r2") enterR2(""); else goTo(n.target); }} style={{ paddingLeft: (n.label === "Wenge" || n.label === "Windows" || n.label === "Downloads") ? 12 : 0, background: active ? "#000080" : "transparent", color: active ? "#fff" : "#000", display: "flex", alignItems: "center", gap: 4, cursor: "pointer", paddingTop: 2, paddingBottom: 2 }}><img src={n.icon} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {n.label}</div>);
+            return (<div key={n.label} onClick={() => { if (n.target === "__recycle") onOpenApp?.("recycle"); else if (n.target === "__network") onOpenApp?.("network"); else if (n.target === "__r2") enterR2(""); else goTo(n.target); }} style={{ paddingLeft: (n.label === "Wenge" || n.label === "Windows" || n.label === "Downloads" || n.label === "Desktop" || n.label === "Documents") ? 12 : 0, background: active ? "#000080" : "transparent", color: active ? "#fff" : "#000", display: "flex", alignItems: "center", gap: 4, cursor: "pointer", paddingTop: 2, paddingBottom: 2 }}><img src={n.icon} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {n.label}</div>);
           })}
         </Frame>
         <Frame
@@ -376,6 +426,17 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
                   const sel = selected === `r2f:${f.key}`;
                   const dl = () => handleDownload({ name, mime: guessMime(name), url: f.url, sourceR2Key: f.key });
                   return (<tr key={f.key} draggable onDragStart={(e) => startDrag(e, { kind: "file", key: f.key, name, url: f.url, size: f.size, mime: guessMime(name) })} onClick={() => setSelected(sel ? null : `r2f:${f.key}`)} onDoubleClick={dl} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to download"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>R2 File</td></tr>);
+                })}
+              </tbody>
+            </table>
+          ) : isVfsDir ? (
+            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+              <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
+              <tbody>
+                <tr onClick={() => goTo("C:\\Wenge")} onDoubleClick={() => goTo("C:\\Wenge")} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>
+                {vfsFiles.map((f) => {
+                  const sel = selected === `vfs:${f.id}`;
+                  return (<tr key={f.id} onClick={() => setSelected(sel ? null : `vfs:${f.id}`)} onDoubleClick={() => openVfsEntry(f.id)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "pointer" }} title="Double-click to open in app"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>{vfsOpenTarget(f)}</td></tr>);
                 })}
               </tbody>
             </table>

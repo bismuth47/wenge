@@ -29,7 +29,10 @@ function formatTime(s: number) {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-export function MediaPlayerApp() {
+import { consumePendingVfsFile } from "../lib/vfs/openWith";
+import type { VfsFile } from "../lib/vfs/types";
+
+export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
   const [tracks, setTracks] = useState<Track[]>(BUILTIN_TRACKS);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -44,6 +47,24 @@ export function MediaPlayerApp() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const progressRef = useRef<HTMLInputElement | null>(null);
+
+  // Open a VFS audio/video file (double-click on Desktop / Explorer)
+  useEffect(() => {
+    const target = file ?? consumePendingVfsFile();
+    if (!target) return;
+    const url = URL.createObjectURL(target.blob);
+    const t: Track = { id: `vfs-${target.id}`, name: target.name, src: url, artist: "VFS" };
+    setTracks((prev) => [...prev, t]);
+    setIndex((prev) => prev); // index set below after tracks update
+    setTimeout(() => {
+      setTracks((prev) => {
+        const i = prev.findIndex((x) => x.id === t.id);
+        if (i >= 0) setIndex(i);
+        return prev;
+      });
+      setPlaying(true);
+    }, 0);
+  }, [file]);
 
   const current = tracks[index] ?? null;
 

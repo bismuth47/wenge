@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95";
-import { handleDownload } from "../lib/downloadTarget";
+import { showError } from "../components/SystemDialog";
+import { getVfsDirByExt } from "../lib/downloadTarget";
+import { saveUrlToVfs } from "../lib/vfs/download";
 
 const QUICK_LINKS = [
   "https://www.bing.com/",
@@ -303,9 +305,7 @@ export function InternetExplorerApp() {
     if (e.key === "Enter") navigateTo(address);
   };
 
-  // Save the current page / linked file via the download destination choice
-  // (real machine vs C:\Wenge\Downloads). Always fetched through /api/proxy
-  // so it works regardless of the target site's CORS policy.
+  // Save the current page to Wenge VFS via /api/proxy
   const handleSave = async () => {
     const target = currentUrl || address.trim();
     if (!target) {
@@ -318,7 +318,7 @@ export function InternetExplorerApp() {
       return;
     }
     setSaving(true);
-    setStatusText(`Saving ${pageUrl}...`);
+    setStatusText(`Saving ${pageUrl} → Wenge...`);
     try {
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(pageUrl)}`);
       if (!res.ok) {
@@ -334,15 +334,16 @@ export function InternetExplorerApp() {
       }
       const ct = res.headers.get("content-type") || "";
       if (ct.includes("application/json")) {
-        // Proxy returns JSON for bot-blocked pages etc. — not a saveable file
         setError("このページは保存できません（プロキシがブロックを検出）。");
         setStatusText("Save failed");
         return;
       }
       const blob = await res.blob();
       const name = fileNameForSave(pageUrl, res.headers.get("content-disposition"));
+      const dir = getVfsDirByExt(name);
       setStatusText(`Document done: ${pageUrl}`);
-      await handleDownload({ name, mime: blob.type || "application/octet-stream", blob, url: pageUrl });
+      await saveUrlToVfs(pageUrl, dir, { filename: name, mime: blob.type || "text/html" });
+      setError(null);
     } catch (e: any) {
       setError(`保存に失敗しました: ${e?.message || String(e)}`);
       setStatusText("Save failed");
@@ -374,6 +375,9 @@ export function InternetExplorerApp() {
     } catch {}
     setStatusText(useProxy ? `互換表示(プロキシ経由): ${currentUrl}` : `Document done: ${currentUrl}`);
     setError(null);
+
+    // Attach link interceptor for VFS downloads (media files, archives, etc.)
+    attachVfsLinkInterceptor();
   };
 
   const handleIframeError = () => {
@@ -386,6 +390,60 @@ export function InternetExplorerApp() {
       setStatusText("Error loading document");
     }
   };
+
+  /** iframe内のDLリンク（拡張子ベース）を横取りしてVFSに保存する */
+  const attachVfsLinkInterceptor = useCallback(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !iframe.contentDocument) return;
+    const doc = iframe.contentDocument;
+    const onClick = (e: MouseEvent) => {
+      const anchor = (e.target as Element).closest("a[href]");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || /^javascript:/i.test(href) || /^data:/i.test(href)) return;
+      const isFile = /\.(mp3|wav|ogg|m4a|flac|mp4|webm|zip|rar|7z|pdf|png|jpg|jpeg|gif|bmp|webp|svg|txt|doc|docx|xls|xlsx)$/i.test(href);
+      if (!isFile) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const absolute = new URL(href, iframe.contentWindow?.location.href || currentUrl).toString();
+        const name = fileNameForSave(absolute, null);
+        const dir = getVfsDirByExt(name);
+        saveUrlToVfs(absolute, dir, { filename: name }).catch(() => {
+          showError("Download", "VFS保存に失敗しました。");
+        });
+      } catch {
+        showError("Download", "リンクの保存に失敗しました。");
+      }
+    };
+    doc.addEventListener("click", onClick, true);
+    // cleanup on next navigation
+    const cleanup = () => {
+      doc.removeEventListener("click", onClick, true);
+    };
+    return cleanup;
+  }, [currentUrl]);
+
+  // Clean up link interceptor when navigating
+  const linkInterceptorRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    // Remove previous interceptor
+    if (linkInterceptorRef.current) {
+      linkInterceptorRef.current();
+      linkInterceptorRef.current = null;
+    }
+    // Attach new one will happen in handleIframeLoad
+  }, [currentUrl]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (linkInterceptorRef.current) {
+        linkInterceptorRef.current();
+        linkInterceptorRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!currentUrl || useProxy || loading === false) return;
@@ -460,7 +518,7 @@ export function InternetExplorerApp() {
         <Button size="sm" onClick={handleStop} disabled={!loading}>Stop</Button>
         <TextInput value={address} onChange={(e) => setAddress(e.target.value)} onKeyDown={handleAddressKeyDown} placeholder="URL または検索ワード (例: wenge / example.com)" style={{ flex: 1, minWidth: 160 }} />
         <Button onClick={handleGo} disabled={loading}>Go</Button>
-        <Button size="sm" onClick={handleSave} disabled={saving || (!currentUrl && !address.trim())} title="このページ/ファイルを保存（保存先を選択）">保存...</Button>
+        <Button size="sm" onClick={handleSave} disabled={saving || (!currentUrl && !address.trim())} title="このページをWenge内に保存">Wenge保存</Button>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

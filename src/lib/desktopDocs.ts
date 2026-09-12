@@ -1,3 +1,10 @@
+/**
+ * Back-compat wrapper: old `docs` (Desktop) API on top of the unified VFS.
+ * New code should use src/lib/vfs/store.ts directly.
+ */
+import { deleteVfsFile, listVfsDir, notifyVfsChanged, saveBlobToVfs, VFS_CHANGED_EVENT } from "./vfs/store";
+import { VFS_DESKTOP, type VfsFile } from "./vfs/types";
+
 export type DesktopDoc = {
   id: string;
   name: string;
@@ -8,97 +15,39 @@ export type DesktopDoc = {
   blob: Blob;
 };
 
-const DB_NAME = "wenge-desktop";
-// Must match downloads.ts: both IDB stores ("docs", "downloads") live in this DB.
-const DB_VERSION = 2;
-const STORE = "docs";
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: "id" });
-      }
-      // Created here too so a fresh DB always has both stores
-      // regardless of which module opens it first.
-      if (!db.objectStoreNames.contains("downloads")) {
-        db.createObjectStore("downloads", { keyPath: "id" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+function toLegacy(f: VfsFile): DesktopDoc {
+  return { id: f.id, name: f.path.replace(/^C:\/Desktop\//i, "") || f.name, mime: f.mime, size: f.size, createdAt: f.createdAt, sourceR2Key: f.sourceR2Key, blob: f.blob };
 }
 
-function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return openDb().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        const t = db.transaction(STORE, mode);
-        const store = t.objectStore(STORE);
-        let req: IDBRequest<T>;
-        try {
-          req = fn(store);
-        } catch (e) {
-          db.close();
-          reject(e);
-          return;
-        }
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-        t.oncomplete = () => db.close();
-        t.onerror = () => {
-          db.close();
-          reject(t.error);
-        };
-      })
-  );
-}
+/** Re-exported so Desktop state can also subscribe to VFS changes. */
+export { VFS_CHANGED_EVENT };
 
 export async function saveDocFromBlob(opts: {
-  name: string;
-  mime: string;
-  blob: Blob;
-  sourceR2Key?: string;
+  name: string; mime: string; blob: Blob; sourceR2Key?: string;
 }): Promise<DesktopDoc> {
-  const doc: DesktopDoc = {
-    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    name: opts.name,
-    mime: opts.mime,
-    size: opts.blob.size,
-    createdAt: new Date().toISOString(),
-    sourceR2Key: opts.sourceR2Key,
-    blob: opts.blob,
-  };
-  await tx("readwrite", (s) => s.put(doc));
-  return doc;
+  const f = await saveBlobToVfs({ blob: opts.blob, dir: VFS_DESKTOP, name: opts.name, mime: opts.mime, sourceR2Key: opts.sourceR2Key });
+  // saveBlobToVfs already notified; keep legacy listeners working too
+  notifyVfsChanged(VFS_DESKTOP);
+  return toLegacy(f);
 }
 
 export async function listDesktopDocs(): Promise<DesktopDoc[]> {
   try {
-    const all = await tx<IDBValidKey[]>("readonly", (s) => s.getAllKeys());
-    void all;
-  } catch {
-    // ignore probe
-  }
-  try {
-    return await tx<DesktopDoc[]>("readonly", (s) => s.getAll());
+    return (await listVfsDir(VFS_DESKTOP)).map(toLegacy);
   } catch {
     return [];
   }
 }
 
 export async function deleteDesktopDoc(id: string): Promise<void> {
-  await tx("readwrite", (s) => s.delete(id));
+  await deleteVfsFile(id);
 }
 
 export function downloadDesktopDoc(doc: DesktopDoc) {
   const url = URL.createObjectURL(doc.blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = doc.name;
+  a.download = doc.name.split("/").pop() || doc.name;
   document.body.appendChild(a);
   a.click();
   a.remove();

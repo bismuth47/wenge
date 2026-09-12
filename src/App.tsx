@@ -54,9 +54,9 @@ import { BriefcaseApp } from "./apps/Briefcase";
 import { DialerApp } from "./apps/Dialer";
 import { NetworkApp } from "./apps/Network";
 import { CdPlayerApp } from "./apps/CdPlayer";
+import { ImageViewerApp } from "./apps/ImageViewer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
 import { R2_DRAG_MIME, guessMime, listR2Flat, r2NameOfKey, type R2DragItem } from "./lib/r2";
-import { handleDownload } from "./lib/downloadTarget";
 import {
   deleteDesktopDoc,
   docIconKey,
@@ -66,6 +66,8 @@ import {
   saveDocFromBlob,
   type DesktopDoc,
 } from "./lib/desktopDocs";
+import { VFS_CHANGED_EVENT } from "./lib/vfs/store";
+import { setPendingVfsFile, vfsOpenTarget } from "./lib/vfs/openWith";
 
 // --- Types ---
 type AppId =
@@ -100,6 +102,7 @@ type AppId =
   | "paint"
   | "calc"
   | "explorer"
+  | "image-viewer"
   | "run";
 
 type WinState = {
@@ -440,6 +443,7 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   "media-player": { title: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer, w: 520, h: 460, component: <MediaPlayerApp /> },
   paint: { title: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
   calc: { title: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
+  "image-viewer": { title: "Image Viewer", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 520, h: 480, component: <ImageViewerApp /> },
   explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 560, h: 400, component: <div /> },
   run: { title: "Run", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 380, h: 200, component: <div /> },
 };
@@ -701,9 +705,11 @@ const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; ico
   return fallback;
 });
 const [draggingFromStart, setDraggingFromStart] = useState<{id: AppId; label: string; iconSrc: string; x: number; y: number; dx: number; dy: number} | null>(null);
-// R2からDnDでコピーされた実体ファイル (IndexedDBにBlob保存、位置はiconPosの `doc:<id>` で管理)
+// VFS実体ファイル (IndexedDB永続・C:/Desktopと同期。位置はiconPosの `doc:<id>` で管理)
 const [desktopDocs, setDesktopDocs] = useState<DesktopDoc[]>([]);
 const [docDropBusy, setDocDropBusy] = useState<string | null>(null);
+// ダブルクリックで開くVFSファイル (appId -> file)。keyにfile.idを使い再マウントさせる
+const [vfsFileByApp, setVfsFileByApp] = useState<Record<string, DesktopDoc>>({});
 
 // グリッドにスナップ
 const snapPos=(x:number,y:number,deskW:number,deskH:number)=>{
@@ -822,30 +828,36 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     localStorage.setItem("wenge_icon_pos", JSON.stringify(pos));
   };
 
-  // IndexedDB内のデスクトップ実体ファイルを読み込み、位置がなければ割り当て
+  // VFS内のデスクトップ実体ファイルを読み込み、位置がなければ割り当て。
+  // VFS変更イベントでも再読込するので、IE/Explorerからの保存が自動でアイコン化される。
   useEffect(()=>{
     let cancelled=false;
-    listDesktopDocs().then((docs)=>{
-      if(cancelled) return;
-      setDesktopDocs(docs);
-      setIconPos((prev)=>{
-        const next={...prev};
-        let changed=false;
-        const { w, h } = desktopSize();
-        const occupied={...next};
-        docs.forEach((d)=>{
-          const k=docIconKey(d.id);
-          if(!next[k]){
-            const spot=findSpotForNew(undefined,undefined,w,h,occupied);
-            next[k]=spot;
-            occupied[k]=spot;
-            changed=true;
-          }
+    const load=()=>{
+      listDesktopDocs().then((docs)=>{
+        if(cancelled) return;
+        setDesktopDocs(docs);
+        setIconPos((prev)=>{
+          const next={...prev};
+          let changed=false;
+          const { w, h } = desktopSize();
+          const occupied={...next};
+          docs.forEach((d)=>{
+            const k=docIconKey(d.id);
+            if(!next[k]){
+              const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+              next[k]=spot;
+              occupied[k]=spot;
+              changed=true;
+            }
+          });
+          return changed?next:prev;
         });
-        return changed?next:prev;
-      });
-    }).catch(()=>{});
-    return ()=>{ cancelled=true; };
+      }).catch(()=>{});
+    };
+    load();
+    const onVfs=()=>load();
+    window.addEventListener(VFS_CHANGED_EVENT, onVfs);
+    return ()=>{ cancelled=true; window.removeEventListener(VFS_CHANGED_EVENT, onVfs); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
@@ -985,6 +997,27 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
   const focusWindow = (id: AppId) => {
     maxZ.current += 1;
     setWindows((p) => p.map((w) => (w.id === id ? { ...w, z: maxZ.current, isMinimized: false } : w)));
+  };
+
+  // VFSファイルを対応アプリで開く (デスクトップ/Explorerのダブルクリック用)
+  const openVfsDoc = (doc: DesktopDoc) => {
+    const vfsFile = {
+      id: doc.id, path: `C:/Desktop/${doc.name}`, name: doc.name.split("/").pop() || doc.name,
+      dir: "C:/Desktop", mime: doc.mime, size: doc.size,
+      createdAt: doc.createdAt, updatedAt: doc.createdAt, blob: doc.blob,
+    };
+    const target = vfsOpenTarget(vfsFile as never);
+    if (target === "preview" || target === "explorer") {
+      const url = URL.createObjectURL(doc.blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return;
+    }
+    const appId = (target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : "media-player") as AppId;
+    // mount時に各アプリがconsumeできるようpendingにも積む + propで確実に渡す
+    setPendingVfsFile(vfsFile as never);
+    setVfsFileByApp((prev) => ({ ...prev, [appId]: doc }));
+    openWindow(appId, { silent: true });
   };
 
   const closeWindow = (id: AppId) => {
@@ -1505,7 +1538,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             </Icon>
           );
         })}
-        {/* R2からコピーされた実体ファイル (IndexedDB)。ダブルクリックで開く/プレビュー、ごみ箱DnDで削除 */}
+        {/* VFS実体ファイル (C:/Desktop・IndexedDB永続)。ダブルクリックで対応アプリに開く、ごみ箱DnDで削除 */}
         {desktopDocs.map((doc) => {
           const k=docIconKey(doc.id);
           const pos=iconPos[k] || getDefaultPos(0, window.innerWidth, window.innerHeight);
@@ -1513,6 +1546,9 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           const recycleHL=false;
           const hlSelected = selected || recycleHL;
           const label=doc.name.split("/").pop() || doc.name;
+          const isImg=/\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(label) || doc.mime.startsWith("image/");
+          const isMedia=/\.(mp3|wav|ogg|m4a|mp4|webm)$/i.test(label) || doc.mime.startsWith("audio/") || doc.mime.startsWith("video/");
+          const iconSrc=isImg?ICONS.paint:isMedia?ICONS.mediaPlayer:(doc.mime.startsWith("text/")||/\.(txt|md|json|js|css|html)$/i.test(label))?ICONS.notepad:ICONS.fileWindows;
           return (
             <Icon
               key={k}
@@ -1523,12 +1559,12 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
               onMouseDown={(e)=> handleIconPointerDown(e, k as AppId)}
               onTouchStart={(e)=> handleIconPointerDown(e, k as AppId)}
               onClick={(e) => { e.stopPropagation(); }}
-              onDoubleClick={(e) => { e.stopPropagation(); handleDownload({ name: doc.name, mime: doc.mime, blob: doc.blob, sourceR2Key: doc.sourceR2Key }); }}
-              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to choose download destination, drag to Recycle Bin to delete`}
+              onDoubleClick={(e) => { e.stopPropagation(); openVfsDoc(doc); }}
+              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to open, drag to Recycle Bin to delete`}
             >
               <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
                 <IconImg
-                  src={ICONS.fileWindows}
+                  src={iconSrc}
                   alt={label}
                   draggable={false}
                   onError={(e) => {
@@ -1604,13 +1640,26 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         if (w.id === "explorer") comp = <ExplorerApp onOpenApp={(id) => openWindow(id as AppId, { silent: true })} />;
         if (w.id === "run") comp = <RunDialog onClose={() => closeWindow("run")} onRun={(id) => openWindow(id as AppId, { silent: true })} />;
         if (w.id === "notepad") {
+          const f = vfsFileByApp["notepad"];
           comp = (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <NotepadApp />
+              <NotepadApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />
               <Separator />
               <DemoControls />
             </div>
           );
+        }
+        if (w.id === "media-player") {
+          const f = vfsFileByApp["media-player"];
+          comp = <MediaPlayerApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />;
+        }
+        if (w.id === "wordpad") {
+          const f = vfsFileByApp["wordpad"];
+          void f;
+        }
+        if (w.id === "image-viewer") {
+          const f = vfsFileByApp["image-viewer"];
+          comp = <ImageViewerApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />;
         }
         return (
           <WindowFrame

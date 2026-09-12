@@ -1,5 +1,7 @@
 import { showDownloadChoice, showError, showInfo } from "../components/SystemDialog";
-import { downloadBlobToMachine, saveDownload } from "./downloads";
+import { downloadBlobToMachine } from "./downloads";
+import { saveBlobToVfs } from "./vfs/store";
+import { VFS_DOWNLOADS, VFS_MEDIA, VFS_DESKTOP, VFS_DOCUMENTS } from "./vfs/types";
 
 export type DownloadTarget = "machine" | "wenge";
 export type DownloadSetting = "ask" | DownloadTarget;
@@ -24,6 +26,20 @@ export function setDownloadSetting(v: DownloadSetting) {
   } catch {}
 }
 
+/** ファイル拡張子に応じたVFS保存先ディレクトリを返す */
+export function getVfsDirByExt(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    mp3: VFS_MEDIA, wav: VFS_MEDIA, ogg: VFS_MEDIA, m4a: VFS_MEDIA, flac: VFS_MEDIA, mid: VFS_MEDIA,
+    png: VFS_DESKTOP, jpg: VFS_DESKTOP, jpeg: VFS_DESKTOP, gif: VFS_DESKTOP, bmp: VFS_DESKTOP,
+    webp: VFS_DESKTOP, svg: VFS_DESKTOP, ico: VFS_DESKTOP,
+    txt: VFS_DOCUMENTS, md: VFS_DOCUMENTS, json: VFS_DOCUMENTS, js: VFS_DOCUMENTS, ts: VFS_DOCUMENTS,
+    html: VFS_DOCUMENTS, htm: VFS_DOCUMENTS, css: VFS_DOCUMENTS, xml: VFS_DOCUMENTS,
+    pdf: VFS_DOCUMENTS, doc: VFS_DOCUMENTS, rtf: VFS_DOCUMENTS,
+  };
+  return map[ext] ?? VFS_DOWNLOADS;
+}
+
 export type DownloadSource = {
   /** display name (may include a virtual folder prefix like "photos/a.png") */
   name: string;
@@ -33,6 +49,8 @@ export type DownloadSource = {
   /** already-available bytes (preferred over url) */
   blob?: Blob;
   sourceR2Key?: string;
+  /** VFS dir for "inside Wenge" saves. Defaults to directory based on file extension */
+  targetDir?: string;
 };
 
 async function resolveBlob(src: DownloadSource): Promise<{ blob: Blob; mime: string }> {
@@ -46,7 +64,8 @@ async function resolveBlob(src: DownloadSource): Promise<{ blob: Blob; mime: str
 
 /**
  * Single entry point for every in-OS download action.
- * Asks machine-vs-Wenge (unless remembered), then executes.
+ * Default is "Wenge内" (VFS) unless remembered otherwise.
+ * File extension determines the VFS destination directory.
  */
 export async function handleDownload(src: DownloadSource): Promise<void> {
   const displayName = src.name.split("/").pop() || src.name;
@@ -66,8 +85,6 @@ export async function handleDownload(src: DownloadSource): Promise<void> {
       showError("Download", "No file data available.");
       return;
     }
-    // Force a real file download instead of navigating (old window.open behavior
-    // only previews viewable types in a tab).
     try {
       const { blob } = await resolveBlob(src);
       downloadBlobToMachine(displayName, blob);
@@ -76,11 +93,12 @@ export async function handleDownload(src: DownloadSource): Promise<void> {
     }
     return;
   }
-  // Inside Wenge: persist bytes to IndexedDB so C:\Wenge\Downloads can show them.
+  // Inside Wenge: persist bytes to the VFS (auto-selected dir by extension)
   try {
     const { blob, mime } = await resolveBlob(src);
-    await saveDownload({ name: src.name, mime, blob, sourceR2Key: src.sourceR2Key });
-    showInfo("Download", `'${displayName}' を C:\\Wenge\\Downloads に保存しました。`);
+    const dir = (src as { targetDir?: string }).targetDir ?? getVfsDirByExt(src.name);
+    await saveBlobToVfs({ name: src.name, dir, mime, blob, sourceR2Key: src.sourceR2Key, sourceUrl: src.url });
+    showInfo("Download", `'${displayName}' を ${dir} に保存しました。`);
   } catch (e: any) {
     showError("Download", e?.message || "Save failed.");
   }
