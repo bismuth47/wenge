@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from "react";
 import styled from "styled-components";
 import { Button, Window, WindowContent, WindowHeader } from "react95";
+import { Win95Scroll } from "./Win95Scroll";
 
 const StyledWindow = styled(Window)<{ $x: number; $y: number; $w: number; $h: number; $z: number; $maximized: boolean }>`
   position: absolute !important;
@@ -35,8 +36,12 @@ const Controls = styled.div`
 
 const Content = styled(WindowContent)`
   flex: 1;
-  overflow: auto;
+  /* macOSオーバーレイ対策: ネイティブバーは GlobalStyles で非表示化し、
+     スクロールUIは内側の Win95Scroll (divベース) が描画する */
+  overflow: hidden;
   position: relative;
+  display: flex;
+  min-height: 0;
 `;
 
 const ResizeHandle = styled.div`
@@ -187,7 +192,9 @@ export function WindowFrame({
           </Button>
         </Controls>
       </Header>
-      <Content>{children}</Content>
+      <Content>
+        <Win95Scroll style={{ flex: 1, minHeight: 0 }}>{children}</Win95Scroll>
+      </Content>
       {!maximized && <ResizeHandle onMouseDown={handleResizeMouseDown} />}
     </StyledWindow>
   );

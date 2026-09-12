@@ -59,28 +59,76 @@ const GlobalStyle = createGlobalStyle`
   .w95-appstarting, .w95-appstarting * {
     cursor: url('/cursors/appstarting.png') 0 0, progress !important;
   }
-  /* ===== Windows 95 scrollbars (WebKit / Blink + Firefox fallback) ===== */
+  /* ===== macOS対策: ネイティブスクロールバーを完全に非表示化 =====
+   * macOS (WebKit/Blink) では「スクロールバーを表示: スクロール時」がONだと
+   * オーバーレイスクロールバーがOS描画され、::-webkit-scrollbar の幅・色・
+   * ボタン指定が無視される。そのためデフォルトはネイティブを消し、
+   * Win95風の見た目は div ベースの .win95-scrollbar (Win95Scroll.tsx) で
+   * 描画する。div はOS設定の影響を受けないためmacOSでも強制適用できる。
+   */
   :root { color-scheme: light; }
   html, body, * {
-    scrollbar-width: auto !important;
-    scrollbar-color: #c0c0c0 #dfdfdf !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
   }
   html ::-webkit-scrollbar,
   html *::-webkit-scrollbar,
   *::-webkit-scrollbar {
+    display: none !important;
+    width: 0px !important;
+    height: 0px !important;
+    -webkit-appearance: none !important;
+    background: transparent !important;
+  }
+  /* スクロール機能自体は残す (wheel / touch / keyboard でスクロール可) */
+  .win95-viewport {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  .win95-viewport::-webkit-scrollbar {
+    display: none !important;
+    width: 0px !important;
+    height: 0px !important;
+    -webkit-appearance: none !important;
+  }
+  /* 独自Win95スクロールバーのベース (実体は Win95Scroll.tsx が描画) */
+  .win95-scrollbar {
+    background-color: #c0c0c0;
+    border-top: 1px solid #dfdfdf;
+    border-left: 1px solid #dfdfdf;
+    border-right: 1px solid #0a0a0a;
+    border-bottom: 1px solid #0a0a0a;
+    box-shadow:
+      inset 1px 1px 0 #ffffff,
+      inset -1px -1px 0 #808080;
+    user-select: none;
+  }
+  .win95-scrollbar-track {
+    background-color: #dfdfdf;
+    background-image: repeating-conic-gradient(#ffffff 0% 25%, #c0c0c0 0% 50%);
+    background-size: 2px 2px;
+  }
+  /* オプトイン: Windows/Linux など非オーバーレイ環境でのみ
+   * ネイティブWin95風を試したいコンテナに .win95-native-scroll を付与する。
+   * macOSオーバーレイ時は無視されるため、確実性が必要なら Win95Scroll を使うこと。 */
+  .win95-native-scroll {
+    scrollbar-width: auto !important;
+    scrollbar-color: #c0c0c0 #dfdfdf !important;
+  }
+  .win95-native-scroll::-webkit-scrollbar {
+    display: block !important;
     width: 16px !important;
     height: 16px !important;
+    -webkit-appearance: auto !important;
   }
-  html ::-webkit-scrollbar-track,
-  html *::-webkit-scrollbar-track,
-  *::-webkit-scrollbar-track {
+  .win95-native-scroll::-webkit-scrollbar-track {
     background-color: #dfdfdf !important;
     background-image: repeating-conic-gradient(#ffffff 0% 25%, #c0c0c0 0% 50%) !important;
     background-size: 2px 2px !important;
   }
-  html ::-webkit-scrollbar-thumb,
-  html *::-webkit-scrollbar-thumb,
-  *::-webkit-scrollbar-thumb {
+  .win95-native-scroll::-webkit-scrollbar-thumb {
     background: #c0c0c0 !important;
     border-top: 1px solid #dfdfdf !important;
     border-left: 1px solid #dfdfdf !important;
@@ -92,14 +140,10 @@ const GlobalStyle = createGlobalStyle`
     min-height: 16px !important;
     min-width: 16px !important;
   }
-  html ::-webkit-scrollbar-thumb:hover,
-  html *::-webkit-scrollbar-thumb:hover,
-  *::-webkit-scrollbar-thumb:hover {
+  .win95-native-scroll::-webkit-scrollbar-thumb:hover {
     background: #c8c8c8 !important;
   }
-  html ::-webkit-scrollbar-thumb:active,
-  html *::-webkit-scrollbar-thumb:active,
-  *::-webkit-scrollbar-thumb:active {
+  .win95-native-scroll::-webkit-scrollbar-thumb:active {
     background: #c0c0c0 !important;
     border-top: 1px solid #0a0a0a !important;
     border-left: 1px solid #0a0a0a !important;
@@ -109,9 +153,7 @@ const GlobalStyle = createGlobalStyle`
       inset 1px 1px 0 #808080 !important,
       inset -1px -1px 0 #ffffff !important;
   }
-  html ::-webkit-scrollbar-button:single-button,
-  html *::-webkit-scrollbar-button:single-button,
-  *::-webkit-scrollbar-button:single-button {
+  .win95-native-scroll::-webkit-scrollbar-button:single-button {
     background-color: #c0c0c0 !important;
     border-top: 1px solid #dfdfdf !important;
     border-left: 1px solid #dfdfdf !important;
@@ -126,9 +168,7 @@ const GlobalStyle = createGlobalStyle`
     background-repeat: no-repeat !important;
     background-position: center center !important;
   }
-  html ::-webkit-scrollbar-button:single-button:active,
-  html *::-webkit-scrollbar-button:single-button:active,
-  *::-webkit-scrollbar-button:single-button:active {
+  .win95-native-scroll::-webkit-scrollbar-button:single-button:active {
     border-top: 1px solid #0a0a0a !important;
     border-left: 1px solid #0a0a0a !important;
     border-right: 1px solid #dfdfdf !important;
@@ -138,34 +178,22 @@ const GlobalStyle = createGlobalStyle`
       inset -1px -1px 0 #ffffff !important;
     background-position: calc(50% + 1px) calc(50% + 1px) !important;
   }
-  html ::-webkit-scrollbar-button:single-button:vertical:decrement,
-  html *::-webkit-scrollbar-button:single-button:vertical:decrement,
-  *::-webkit-scrollbar-button:single-button:vertical:decrement {
+  .win95-native-scroll::-webkit-scrollbar-button:single-button:vertical:decrement {
     background-image: ${ARROW_UP} !important;
   }
-  html ::-webkit-scrollbar-button:single-button:vertical:increment,
-  html *::-webkit-scrollbar-button:single-button:vertical:increment,
-  *::-webkit-scrollbar-button:single-button:vertical:increment {
+  .win95-native-scroll::-webkit-scrollbar-button:single-button:vertical:increment {
     background-image: ${ARROW_DOWN} !important;
   }
-  html ::-webkit-scrollbar-button:single-button:horizontal:decrement,
-  html *::-webkit-scrollbar-button:single-button:horizontal:decrement,
-  *::-webkit-scrollbar-button:single-button:horizontal:decrement {
+  .win95-native-scroll::-webkit-scrollbar-button:single-button:horizontal:decrement {
     background-image: ${ARROW_LEFT} !important;
   }
-  html ::-webkit-scrollbar-button:single-button:horizontal:increment,
-  html *::-webkit-scrollbar-button:single-button:horizontal:increment,
-  *::-webkit-scrollbar-button:single-button:horizontal:increment {
+  .win95-native-scroll::-webkit-scrollbar-button:single-button:horizontal:increment {
     background-image: ${ARROW_RIGHT} !important;
   }
-  html ::-webkit-scrollbar-corner,
-  html *::-webkit-scrollbar-corner,
-  *::-webkit-scrollbar-corner {
+  .win95-native-scroll::-webkit-scrollbar-corner {
     background: #c0c0c0 !important;
   }
-  html ::-webkit-resizer,
-  html *::-webkit-resizer,
-  *::-webkit-resizer {
+  .win95-native-scroll::-webkit-resizer {
     background: #c0c0c0 !important;
   }
   body {
