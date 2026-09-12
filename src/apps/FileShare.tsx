@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
+import { listR2, normalizePrefix, uploadToR2, type R2File } from "../lib/r2";
 
-type FileItem = { key: string; url: string; size: number; uploadedAt: string };
+type FileItem = R2File;
 
 export function FileShareApp() {
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -12,18 +13,22 @@ export function FileShareApp() {
 
   const fetchFiles = async () => {
     try {
-      const res = await fetch(`/api/files${prefix ? `?prefix=${encodeURIComponent(prefix)}` : ""}`);
-      if (res.ok) {
-        const data = await res.json();
-        setFiles(data.files ?? []);
-      } else {
-        // fallback mock
-        setFiles([{ key: "demo/wenge.txt", url: "#", size: 1024, uploadedAt: new Date().toISOString() }]);
+      // Folder-aware list; FileShare keeps working with flat prefix filter
+      const data = await listR2(prefix);
+      const flat = [...data.folders.map((fd) => ({ key: `${normalizePrefix(prefix)}${fd}/`, url: "#", size: 0, uploadedAt: new Date(0).toISOString() })), ...data.files];
+      setFiles(flat);
+      if (data.note) {
+        const raw = localStorage.getItem("wenge_files");
+        if (raw && flat.length === 0) setFiles(JSON.parse(raw));
       }
     } catch {
       // local fallback
       const raw = localStorage.getItem("wenge_files");
-      if (raw) setFiles(JSON.parse(raw));
+      if (raw) {
+        try { setFiles(JSON.parse(raw)); } catch { setFiles([]); }
+      } else {
+        setFiles([]);
+      }
     }
   };
 
@@ -37,11 +42,8 @@ export function FileShareApp() {
     setUploading(true);
     setProgress(10);
     try {
-      // Try presigned upload flow, fallback to direct /api/files
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/files", { method: "POST", body: form });
-      if (!res.ok) throw new Error("upload failed");
+      // Presigned PUT flow via shared lib (server signs, browser PUTs to R2)
+      await uploadToR2(prefix, file);
       setProgress(90);
       await fetchFiles();
       setProgress(100);
@@ -113,9 +115,13 @@ export function FileShareApp() {
                   <td style={{ textAlign: "center" }}>{(f.size / 1024).toFixed(1)} KB</td>
                   <td style={{ textAlign: "center", fontSize: 10 }}>{new Date(f.uploadedAt).toLocaleString()}</td>
                   <td style={{ textAlign: "center" }}>
-                    <Button size="sm" onClick={() => window.open(f.url, "_blank")}>
-                      Open
-                    </Button>
+                    {f.url === "#" ? (
+                      <span style={{ fontSize: 10, color: "#808080" }}>Folder</span>
+                    ) : (
+                      <Button size="sm" onClick={() => window.open(f.url, "_blank")}>
+                        Open
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}

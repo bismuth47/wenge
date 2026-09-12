@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import {
   Button,
@@ -17,7 +17,8 @@ import {
   Radio,
 } from "react95";
 import { WindowFrame } from "./components/WindowFrame";
-import { SystemDialogs, showConfirm, showInfo } from "./components/SystemDialog";
+import { Win95Scroll } from "./components/Win95Scroll";
+import { SystemDialogs, showConfirm, showError, showInfo } from "./components/SystemDialog";
 import { XpBoot } from "./components/XpBoot";
 import { XpLogin } from "./components/XpLogin";
 import { useClock } from "./hooks/useClock";
@@ -54,6 +55,17 @@ import { DialerApp } from "./apps/Dialer";
 import { NetworkApp } from "./apps/Network";
 import { CdPlayerApp } from "./apps/CdPlayer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
+import { R2_DRAG_MIME, guessMime, listR2Flat, r2NameOfKey, type R2DragItem } from "./lib/r2";
+import {
+  deleteDesktopDoc,
+  docIconKey,
+  docIdFromKey,
+  isDocIconKey,
+  listDesktopDocs,
+  previewDesktopDoc,
+  saveDocFromBlob,
+  type DesktopDoc,
+} from "./lib/desktopDocs";
 
 // --- Types ---
 type AppId =
@@ -291,6 +303,39 @@ const VolumePopup = styled.div`
   box-sizing: border-box;
 `;
 
+// --- Programsサブメニュー: 画面内に収まるよう上下位置を自動補正 ---
+// 実測で判明した問題: サブメニュー (maxHeight=100dvh-80) を Programs行の
+// top:-4 に固定すると、高さ620pxに対して行位置y=406 → 下端1026が画面外
+// (700px画面) にはみ出し、下部項目がスクロールでも到達不可に見えた。
+// 実機Win95と同様、下端がタスクバーに掛かる場合は上へずらして収める。
+function ProgramsSubmenu({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const adjust = () => {
+      el.style.top = "-4px";
+      const r = el.getBoundingClientRect();
+      const maxBottom = window.innerHeight - 34; // タスクバー分を除外
+      if (r.bottom > maxBottom) {
+        el.style.top = `${-4 - (r.bottom - maxBottom)}px`;
+      }
+      const r2 = el.getBoundingClientRect();
+      if (r2.top < 2) {
+        el.style.top = `${parseFloat(el.style.top || "-4") - r2.top + 2}px`;
+      }
+    };
+    adjust();
+    window.addEventListener("resize", adjust);
+    return () => window.removeEventListener("resize", adjust);
+  }, []);
+  return (
+    <div ref={ref} style={{ position:"absolute", left:"100%", top:-4, width:216, maxHeight:"calc(100dvh - 80px)", zIndex:9999, display:"flex", flexDirection:"column", minHeight:0, cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+      {children}
+    </div>
+  );
+}
+
 // --- Tray speaker: click toggles a small volume slider popup (Win95 style) ---
 function TrayVolume() {
   const [open, setOpen] = useState(false);
@@ -398,6 +443,39 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 560, h: 400, component: <div /> },
   run: { title: "Run", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 380, h: 200, component: <div /> },
 };
+
+// --- Programsメニュー構成 (実機Win95準拠のカスケード分類) ---
+// フラットに全件並べると巨大化するため、分類フォルダ配下に収める。
+// トップ直下は分類4 + 単独6 = 10行程度に収まる。全アプリ追加時はここへ追記。
+type ProgramsGroup = { label: string; ids: AppId[] };
+const PROGRAMS_GROUPS: ProgramsGroup[] = [
+  { label: "Accessories", ids: ["wordpad", "notepad", "paint", "calc", "clock", "charmap", "msdos"] },
+  { label: "Multimedia", ids: ["media-player", "cd-player", "sound-recorder", "volume"] },
+  { label: "Games", ids: ["minesweeper", "solitaire", "freecell", "hearts"] },
+  { label: "System Tools", ids: ["scandisk", "backup", "sysmon"] },
+];
+const PROGRAMS_TOP: AppId[] = ["explorer", "file-share", "chat", "briefcase", "dialer", "network"];
+
+// --- Documentsメニュー構成 (実機Win95準拠: Explorerを直接開かずカスケード表示) ---
+// ExplorerApp の "C:\\Wenge\\Documents" と同期させる。appId があるものは
+// 対応アプリを開き、ないもの (Budget.xls 等) は Explorer でフォルダ表示する。
+type DocumentsItem = { label: string; appId: AppId; iconSrc: string };
+const DOCUMENTS_ITEMS: DocumentsItem[] = [
+  { label: "README.txt", appId: "notepad", iconSrc: ICONS.notepad },
+  { label: "Report.doc", appId: "wordpad", iconSrc: ICONS.wordpad },
+  { label: "Budget.xls", appId: "explorer", iconSrc: ICONS.fileWindows },
+];
+
+// --- Settingsメニュー構成 (実機Win95準拠: 直開きせずカスケード表示) ---
+const SETTINGS_ITEMS: DocumentsItem[] = [
+  { label: "Control Panel", appId: "control", iconSrc: ICONS.controlPanel },
+];
+
+// --- Findメニュー構成 (実機Win95準拠: 直開きせずカスケード表示) ---
+const FIND_ITEMS: DocumentsItem[] = [
+  { label: "Files or Folders...", appId: "find", iconSrc: ICONS.find },
+  { label: "Computer...", appId: "network", iconSrc: ICONS.network },
+];
 
 function PaintApp() {
   const [color, setColor] = useState("#ff0000");
@@ -582,6 +660,10 @@ const [contextMenu,setContextMenu]=useState<{x:number,y:number}|null>(null);
 const longPressTimer=useRef<number|null>(null);
 const [startOpen, setStartOpen] = useState(false);
 const [programsOpen, setProgramsOpen] = useState(false);
+const [documentsOpen, setDocumentsOpen] = useState(false);
+const [settingsOpen, setSettingsOpen] = useState(false);
+const [findOpen, setFindOpen] = useState(false);
+  const [openSub, setOpenSub] = useState<string | null>(null);
 const [showBsod, setShowBsod] = useState(false);
   // XP-style boot -> login -> desktop phases. Reload always restarts from "boot" (no persistence by design).
   const [phase, setPhase] = useState<"boot" | "login" | "desktop">("boot");
@@ -619,6 +701,9 @@ const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; ico
   return fallback;
 });
 const [draggingFromStart, setDraggingFromStart] = useState<{id: AppId; label: string; iconSrc: string; x: number; y: number; dx: number; dy: number} | null>(null);
+// R2からDnDでコピーされた実体ファイル (IndexedDBにBlob保存、位置はiconPosの `doc:<id>` で管理)
+const [desktopDocs, setDesktopDocs] = useState<DesktopDoc[]>([]);
+const [docDropBusy, setDocDropBusy] = useState<string | null>(null);
 
 // グリッドにスナップ
 const snapPos=(x:number,y:number,deskW:number,deskH:number)=>{
@@ -670,13 +755,24 @@ const addToDesktop = (id: AppId, opts?: {label?:string; iconSrc?:string; x?:numb
   setDesktopIcons(prev=> prev.some(ic=>ic.id===id)?prev:[...prev,{id,label:opts?.label??def.title,icon:def.icon,iconSrc:opts?.iconSrc??def.iconSrc}]);
   setIconPos(prev=>({...prev,[id]:pos}));
 };
-const removeFromDesktop = (id: AppId) => {
+const removeFromDesktop = (id: AppId | string) => {
+  // IndexedDBに複製された実体ファイルの削除
+  if (typeof id === "string" && isDocIconKey(id)) {
+    const docId = docIdFromKey(id);
+    deleteDesktopDoc(docId).catch(() => {});
+    setDesktopDocs((prev) => prev.filter((d) => d.id !== docId));
+    setIconPos((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    setSelectedIds((prev) => { if (!prev.has(id as AppId)) return prev; const n = new Set(prev); n.delete(id as AppId); return n; });
+    playRecycle();
+    return;
+  }
   // ごみ箱・Run自体は削除不可
   if(id==="recycle"||id==="run"){ playError(); return; }
-  if(!desktopIcons.some(ic=>ic.id===id)) return;
-  setDesktopIcons(prev=>prev.filter(ic=>ic.id!==id));
-  setIconPos(prev=>{ const n={...prev}; delete n[id]; return n; });
-  setSelectedIds(prev=>{ if(!prev.has(id)) return prev; const n=new Set(prev); n.delete(id); return n; });
+  const appId = id as AppId;
+  if(!desktopIcons.some(ic=>ic.id===appId)) return;
+  setDesktopIcons(prev=>prev.filter(ic=>ic.id!==appId));
+  setIconPos(prev=>{ const n={...prev}; delete n[appId]; return n; });
+  setSelectedIds(prev=>{ if(!prev.has(appId)) return prev; const n=new Set(prev); n.delete(appId); return n; });
   playRecycle();
 };
 // カーソル位置がごみ箱アイコン上かどうか
@@ -719,9 +815,107 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     const pos:Record<string,{x:number,y:number}>={};
     const sorted=[...desktopIcons].sort((a,b)=> a.label.localeCompare(b.label));
     sorted.forEach((ic,i)=> pos[ic.id]=getDefaultPos(i,w,h));
-    pos["run"]=getDefaultPos(sorted.length,w,h);
+    const sortedDocs=[...desktopDocs].sort((a,b)=> a.name.localeCompare(b.name));
+    sortedDocs.forEach((d,i)=> { pos[docIconKey(d.id)]=getDefaultPos(sorted.length+1+i,w,h); });
+    pos["run"]=getDefaultPos(sorted.length+1+sortedDocs.length,w,h);
     setIconPos(pos);
     localStorage.setItem("wenge_icon_pos", JSON.stringify(pos));
+  };
+
+  // IndexedDB内のデスクトップ実体ファイルを読み込み、位置がなければ割り当て
+  useEffect(()=>{
+    let cancelled=false;
+    listDesktopDocs().then((docs)=>{
+      if(cancelled) return;
+      setDesktopDocs(docs);
+      setIconPos((prev)=>{
+        const next={...prev};
+        let changed=false;
+        const { w, h } = desktopSize();
+        const occupied={...next};
+        docs.forEach((d)=>{
+          const k=docIconKey(d.id);
+          if(!next[k]){
+            const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+            next[k]=spot;
+            occupied[k]=spot;
+            changed=true;
+          }
+        });
+        return changed?next:prev;
+      });
+    }).catch(()=>{});
+    return ()=>{ cancelled=true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+
+  // Explorer(R2) / OSからのドラッグ受け入れ → IndexedDBに複製してアイコン化
+  const handleDesktopDragOver=(e: React.DragEvent)=>{
+    const types=Array.from(e.dataTransfer.types || []);
+    if(types.includes(R2_DRAG_MIME) || types.includes("Files")){ e.preventDefault(); e.dataTransfer.dropEffect="copy"; }
+  };
+  const placeDocAt=(docId: string, clientX: number, clientY: number)=>{
+    const rect=desktopRef.current?.getBoundingClientRect();
+    const { w, h }=desktopSize();
+    const wantX=rect?clientX-rect.left-40:undefined;
+    const wantY=rect?clientY-rect.top-30:undefined;
+    setIconPos((prev)=>{
+      const spot=findSpotForNew(wantX,wantY,w,h,prev);
+      return {...prev,[docIconKey(docId)]:spot};
+    });
+  };
+  const handleDesktopDrop=async (e: React.DragEvent)=>{
+    const raw=e.dataTransfer.getData(R2_DRAG_MIME);
+    if(!raw) return; // OSファイルの直接ドロップはExplorer(R2ビュー)側で扱う
+    e.preventDefault();
+    e.stopPropagation();
+    let item: R2DragItem;
+    try{ item=JSON.parse(raw) as R2DragItem; }catch{ return; }
+    setDocDropBusy("Copying...");
+    try{
+      if(item.kind==="file"){
+        const res=await fetch(item.url);
+        if(!res.ok) throw new Error(`download failed: ${res.status}`);
+        const blob=await res.blob();
+        const doc=await saveDocFromBlob({ name: item.name, mime: blob.type || item.mime || guessMime(item.name), blob, sourceR2Key: item.key });
+        setDesktopDocs((prev)=>[doc,...prev]);
+        placeDocAt(doc.id,e.clientX,e.clientY);
+        playRestore();
+      }else{
+        const files=await listR2Flat(item.prefix);
+        if(files.length===0){ showInfo("Desktop",`Folder '${item.name}' is empty.\nNothing to copy.`); return; }
+        if(files.length>50){
+          const ok=await showConfirm("Desktop",`Copy ${files.length} files from '${item.name}' to the Desktop?\nThis may take a while.`,"Copy","Cancel");
+          if(!ok) return;
+        }
+        let first=true;
+        for(const f of files){
+          try{
+            const rel=f.key.slice(item.prefix.length) || r2NameOfKey(f.key);
+            const name=`${item.name}/${rel}`;
+            const res=await fetch(f.url);
+            if(!res.ok) continue;
+            const blob=await res.blob();
+            const doc=await saveDocFromBlob({ name, mime: blob.type || guessMime(name), blob, sourceR2Key: f.key });
+            setDesktopDocs((prev)=>[doc,...prev]);
+            if(first){ placeDocAt(doc.id,e.clientX,e.clientY); first=false; }
+            else{
+              setIconPos((prev)=>{
+                const { w, h }=desktopSize();
+                const spot=findSpotForNew(undefined,undefined,w,h,prev);
+                return {...prev,[docIconKey(doc.id)]:spot};
+              });
+            }
+          }catch{ /* 1ファイルの失敗では全体を止めない */ }
+        }
+        playRestore();
+      }
+    }catch(err:any){
+      playError();
+      showError("Desktop","Copy failed.\n"+(err?.message || "Could not download from R2."));
+    }finally{
+      setDocDropBusy(null);
+    }
   };
 
   // Startup sound plays once the desktop unlocks (login click counts as the user gesture)
@@ -885,7 +1079,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     const clientX = e.clientX;
     const clientY = e.clientY;
     setStartOpen(false);
-    setProgramsOpen(false);
+    setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
     // つかんでいるアイコンがカーソルの真ん中に来るようオフセットを取る
     setDraggingFromStart({id, label, iconSrc, x: clientX, y: clientY, dx: 40, dy: 30});
     setDragging({id, offsetX: 40, offsetY: 30, startX: clientX, startY: clientY, hasMoved:false});
@@ -901,7 +1095,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       // Startボタン以外でのタスクバーClickはStartメニューを閉じる
       if(!target.closest("[data-start-button]")){
         setStartOpen(false);
-        setProgramsOpen(false);
+        setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
       }
       return;
     }
@@ -910,12 +1104,12 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       setSelectedIds(new Set());
       setContextMenu(null);
       setStartOpen(false);
-      setProgramsOpen(false);
+      setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
       return;
     }
     setSelectedIds(new Set());
     setStartOpen(false);
-    setProgramsOpen(false);
+    setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
     setContextMenu(null);
     if(e.button!==0) return;
     const rect=desktopRef.current?.getBoundingClientRect();
@@ -1206,6 +1400,47 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     setContextMenu({x:e.clientX, y:e.clientY});
   };
 
+  // Programsメニュー1行分 (APP_DEFSから動的生成)。メニュー確定後は閉じる。
+  // カスケード遷移時の角切り (Programs行→サブメニューへ斜め移動で一瞬枠外を
+  // かすめる) で即閉じしないよう、閉鎖は遅延・再入場で取り消す。
+  const closeTimer = useRef<number | null>(null);
+  const cancelMenuClose = () => {
+    if (closeTimer.current != null) { window.clearTimeout(closeTimer.current); closeTimer.current = null; }
+  };
+  const scheduleMenuClose = () => {
+    cancelMenuClose();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
+      setOpenSub(null);
+    }, 300);
+  };
+  const closeMenus = () => { cancelMenuClose(); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); setOpenSub(null); };
+  const renderProgramItem = (id: AppId) => {
+    const def = APP_DEFS[id];
+    if (!def) return null;
+    return (
+      <MenuListItem
+        key={id}
+        onClick={() => { openWindow(id, { silent: true }); closeMenus(); }}
+        style={{ fontSize: 11, height:26, display:"flex", alignItems:"center", justifyContent:"flex-start" }}
+        onMouseDown={(e) => handleStartMenuItemPointerDown(e, id, def.title, def.iconSrc as any)}
+      >
+        <img src={def.iconSrc} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>{def.title}</span>
+      </MenuListItem>
+    );
+  };
+  const renderDocumentsItem = (doc: DocumentsItem) => (
+    <MenuListItem
+      key={doc.label}
+      onClick={() => { openWindow(doc.appId, { silent: true }); closeMenus(); }}
+      style={{ fontSize: 11, height:26, display:"flex", alignItems:"center", justifyContent:"flex-start" }}
+      onMouseDown={(e) => handleStartMenuItemPointerDown(e, doc.appId, doc.label, doc.iconSrc as any)}
+    >
+      <img src={doc.iconSrc} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering:"pixelated" as const }} /> <span style={{ flex:1, textAlign:"left" }}>{doc.label}</span>
+    </MenuListItem>
+  );
+
   // --- XP boot / login gate (spec: show XP startup screen on open, password 4747 to enter) ---
   // Shutdown / Log off keeps the reload behavior, so a reload always restarts from boot.
   if (phase === "boot") {
@@ -1219,7 +1454,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     <Desktop
       $bg={desktopBg}
       ref={desktopRef}
-      onClick={() => { if(suppressDesktopClick.current){ suppressDesktopClick.current=false; return; } setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setContextMenu(null); }}
+      onClick={() => { if(suppressDesktopClick.current){ suppressDesktopClick.current=false; return; } setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); setContextMenu(null); }}
       onMouseDown={handleDesktopMouseDown}
       onMouseMove={handleDesktopMouseMove}
       onMouseUp={handleDesktopMouseUp}
@@ -1227,6 +1462,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onContextMenu={handleDesktopContextMenu}
+      onDragOver={handleDesktopDragOver}
+      onDrop={handleDesktopDrop}
     >
       <IconsLayer>
         {desktopIcons.map((ic) => {
@@ -1265,6 +1502,44 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             </Icon>
           );
         })}
+        {/* R2からコピーされた実体ファイル (IndexedDB)。ダブルクリックで開く/プレビュー、ごみ箱DnDで削除 */}
+        {desktopDocs.map((doc) => {
+          const k=docIconKey(doc.id);
+          const pos=iconPos[k] || getDefaultPos(0, window.innerWidth, window.innerHeight);
+          const selected=selectedIds.has(k as AppId);
+          const recycleHL=false;
+          const hlSelected = selected || recycleHL;
+          const label=doc.name.split("/").pop() || doc.name;
+          return (
+            <Icon
+              key={k}
+              data-icon
+              $selected={hlSelected}
+              $x={pos.x}
+              $y={pos.y}
+              onMouseDown={(e)=> handleIconPointerDown(e, k as AppId)}
+              onTouchStart={(e)=> handleIconPointerDown(e, k as AppId)}
+              onClick={(e) => { e.stopPropagation(); }}
+              onDoubleClick={(e) => { e.stopPropagation(); previewDesktopDoc(doc); }}
+              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to open, drag to Recycle Bin to delete`}
+            >
+              <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
+                <IconImg
+                  src={ICONS.fileWindows}
+                  alt={label}
+                  draggable={false}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                    const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                    if (fb) fb.style.display = "grid";
+                  }}
+                />
+                <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.fileWindows}</IconFallback>
+              </div>
+              <IconLabel>{label}</IconLabel>
+            </Icon>
+          );
+        })}
         {/* Run icon */}
         {(()=>{
           const pos=iconPos["run"] || {x:12,y:12};
@@ -1300,8 +1575,13 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         )}
       </IconsLayer>
 
-      {/* Context menu */}
-      {contextMenu && (
+      {/* R2→Desktop copy progress */}
+      {docDropBusy && (
+        <div style={{ position: "fixed", right: 8, bottom: 38, zIndex: 9998, background: "#c0c0c0", border: "2px outset #fff", padding: "6px 10px", fontSize: 11 }}>
+          {docDropBusy}
+        </div>
+      )}
+      {/* Context menu */}      {contextMenu && (
         <ContextMenu data-context-menu $x={contextMenu.x} $y={contextMenu.y} onClick={e=>e.stopPropagation()}>
           <MenuList style={{ width:"100%" }}>
             <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Auto Arrange</MenuListItem>
@@ -1395,61 +1675,89 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                 </div>
                 <div style={{ flex: 1, position:"relative" }}>
                   {/* Programs with cascading submenu */}
-                  <div onMouseEnter={()=>setProgramsOpen(true)} onMouseLeave={()=>setProgramsOpen(false)} style={{ position:"relative" }}>
-                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", fontSize:11, cursor: "url('/cursors/arrow.png') 0 0, default" }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "my-computer", "Programs", ICONS.myComputer as any)}>
-                      <img src={ICONS.myComputer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />
-                      Programs <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
+                  <div onMouseEnter={()=>{ cancelMenuClose(); setProgramsOpen(true); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
+                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "my-computer", "Programs", ICONS.myComputer as any)}>
+                      <img src={ICONS.myComputer} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} />
+                      <span style={{ flex:1, textAlign:"left" }}>Programs</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                     </MenuListItem>
                     {programsOpen && (
-                      <div style={{ position:"absolute", left:"100%", top:-4, width:200, zIndex:9999, cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                      <ProgramsSubmenu>
+                        {/* トップ階層は10行・約245pxで確定しスクロール不要のため
+                            Win95Scrollを挟まない (5px程度の誤差オーバーフローによる
+                            誤スクロールバー/ヒットテスト不安定化を構造的に排除)。
+                            万一の極小画面向け位置補正はProgramsSubmenuが担う。 */}
                         <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
                           <MenuList style={{ width:"100%" }}>
-                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", background:"#c0c0c0", fontWeight:"bold" }}>Accessories</div>
-                            <MenuListItem onClick={() => { openWindow("wordpad", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "wordpad", "WordPad", ICONS.wordpad as any)}><img src={ICONS.wordpad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> WordPad</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("notepad", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "notepad", "Notepad", ICONS.notepad as any)}><img src={ICONS.notepad} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Notepad</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("paint", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "paint", "Paint", ICONS.paint as any)}><img src={ICONS.paint} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Paint</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("calc", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "calc", "Calculator", ICONS.calc as any)}><img src={ICONS.calc} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Calculator</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("clock", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "clock", "Clock", ICONS.clock as any)}><img src={ICONS.clock} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Clock</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("charmap", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "charmap", "Character Map", ICONS.charmap as any)}><img src={ICONS.charmap} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Character Map</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("msdos", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "msdos", "MS-DOS Prompt", ICONS.msdos as any)}><img src={ICONS.msdos} alt="" width={16} height={16} style={{ marginRight: 8 }} /> MS-DOS Prompt</MenuListItem>
+                            {PROGRAMS_GROUPS.map((g) => (
+                              <div key={g.label} onMouseEnter={()=>{ cancelMenuClose(); setOpenSub(g.label); }} onMouseLeave={()=>setOpenSub(null)} style={{ position:"relative" }}>
+                                <MenuListItem style={{ fontSize:11, height:26, display:"flex", alignItems:"center", justifyContent:"flex-start" }}>
+                                  <img src={ICONS.folderClosed} alt="" width={20} height={20} style={{ marginRight:5, imageRendering:"pixelated" as const }} /> <span style={{ flex:1, textAlign:"left" }}>{g.label}</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
+                                </MenuListItem>
+                                {openSub===g.label && (
+                                  <ProgramsSubmenu>
+                                    <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", display:"flex", flexDirection:"column", flex:1, minHeight:0, minWidth:0, maxHeight:"inherit", overflow:"hidden", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                                      <Win95Scroll style={{ flex:1, minHeight:0, minWidth:0, width:"100%" }} maxHeight="calc(100dvh - 88px)">
+                                        <MenuList style={{ width:"100%" }}>
+                                          {g.ids.map(renderProgramItem)}
+                                        </MenuList>
+                                      </Win95Scroll>
+                                    </Frame>
+                                  </ProgramsSubmenu>
+                                )}
+                              </div>
+                            ))}
                             <Separator />
-                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", fontWeight:"bold" }}>Multimedia</div>
-                            <MenuListItem onClick={() => { openWindow("media-player", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "media-player", "Media Player", ICONS.mediaPlayer as any)}><img src={ICONS.mediaPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Media Player</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("cd-player", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "cd-player", "CD Player", ICONS.cdPlayer as any)}><img src={ICONS.cdPlayer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> CD Player</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("sound-recorder", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "sound-recorder", "Sound Recorder", ICONS.soundRecorder as any)}><img src={ICONS.soundRecorder} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Sound Recorder</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("volume", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "volume", "Volume Control", ICONS.volume as any)}><img src={ICONS.volume} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Volume Control</MenuListItem>
-                            <Separator />
-                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", fontWeight:"bold" }}>Games</div>
-                            <MenuListItem onClick={() => { openWindow("minesweeper", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "minesweeper", "Minesweeper", ICONS.minesweeper as any)}><img src={ICONS.minesweeper} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Minesweeper</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("solitaire", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "solitaire", "Solitaire", ICONS.solitaire as any)}><img src={ICONS.solitaire} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Solitaire</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("freecell", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "freecell", "FreeCell", ICONS.freecell as any)}><img src={ICONS.freecell} alt="" width={16} height={16} style={{ marginRight: 8 }} /> FreeCell</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("hearts", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "hearts", "Hearts", ICONS.hearts as any)}><img src={ICONS.hearts} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Hearts</MenuListItem>
-                            <Separator />
-                            <div style={{ fontSize:9, color:"#808080", padding:"2px 6px", fontWeight:"bold" }}>System Tools</div>
-                            <MenuListItem onClick={() => { openWindow("scandisk", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "scandisk", "ScanDisk", ICONS.scandisk as any)}><img src={ICONS.scandisk} alt="" width={16} height={16} style={{ marginRight: 8 }} /> ScanDisk</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("backup", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "backup", "Backup", ICONS.backup as any)}><img src={ICONS.backup} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Backup</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("sysmon", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "sysmon", "System Monitor", ICONS.sysmon as any)}><img src={ICONS.sysmon} alt="" width={16} height={16} style={{ marginRight: 8 }} /> System Monitor</MenuListItem>
-                            <Separator />
-                            <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "explorer", "Explorer", ICONS.explorer as any)}><img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Explorer</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("file-share", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "file-share", "File Share", ICONS.fileShare as any)}><img src={ICONS.fileShare} alt="" width={16} height={16} style={{ marginRight: 8 }} /> File Share</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("chat", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "chat", "Wenge Chat", ICONS.chat as any)}><img src={ICONS.chat} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Wenge Chat</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("briefcase", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "briefcase", "Briefcase", ICONS.briefcase as any)}><img src={ICONS.briefcase} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Briefcase</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("dialer", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "dialer", "Phone Dialer", ICONS.dialer as any)}><img src={ICONS.dialer} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Phone Dialer</MenuListItem>
-                            <MenuListItem onClick={() => { openWindow("network", { silent: true }); setStartOpen(false); setProgramsOpen(false); }} style={{ fontSize: 11, height:22 }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "network", "Network Neighborhood", ICONS.network as any)}><img src={ICONS.network} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Network Neighborhood</MenuListItem>
+                            {PROGRAMS_TOP.map(renderProgramItem)}
                           </MenuList>
                         </Frame>
-                      </div>
+                      </ProgramsSubmenu>
                     )}
                   </div>
 {/* 実機7項目 */}
-                   <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.explorer} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} /> Documents <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
-                   <MenuListItem onClick={() => { openWindow("control", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.controlPanel} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Settings <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
-                   <MenuListItem onClick={() => { openWindow("find", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.find} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Find <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
-                   <MenuListItem onClick={() => { openWindow("help", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.help} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Help</MenuListItem>
-                   <MenuListItem onClick={() => { openWindow("run", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...</MenuListItem>
+                   {/* Documents with cascading submenu (Programs同様: hoverで展開、Explorer直開きしない) */}
+                   <div onMouseEnter={()=>{ cancelMenuClose(); setDocumentsOpen(true); setProgramsOpen(false); setSettingsOpen(false); setFindOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
+                     <MenuListItem onClick={() => { cancelMenuClose(); setDocumentsOpen(true); setProgramsOpen(false); setSettingsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.explorer} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /> <span style={{ flex:1, textAlign:"left" }}>Documents</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                     {documentsOpen && (
+                       <ProgramsSubmenu>
+                         <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                           <MenuList style={{ width:"100%" }}>
+                             {DOCUMENTS_ITEMS.map(renderDocumentsItem)}
+                           </MenuList>
+                         </Frame>
+                       </ProgramsSubmenu>
+                     )}
+                   </div>
+                   {/* Settings with cascading submenu (Programs同様: hoverで展開、直開きしない) */}
+                   <div onMouseEnter={()=>{ cancelMenuClose(); setSettingsOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setFindOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
+                     <MenuListItem onClick={() => { cancelMenuClose(); setSettingsOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.controlPanel} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Settings</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                     {settingsOpen && (
+                       <ProgramsSubmenu>
+                         <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                           <MenuList style={{ width:"100%" }}>
+                             {SETTINGS_ITEMS.map(renderDocumentsItem)}
+                           </MenuList>
+                         </Frame>
+                       </ProgramsSubmenu>
+                     )}
+                   </div>
+                   {/* Find with cascading submenu (Programs同様: hoverで展開、直開きしない) */}
+                   <div onMouseEnter={()=>{ cancelMenuClose(); setFindOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
+                     <MenuListItem onClick={() => { cancelMenuClose(); setFindOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.find} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Find</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
+                     {findOpen && (
+                       <ProgramsSubmenu>
+                         <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                           <MenuList style={{ width:"100%" }}>
+                             {FIND_ITEMS.map(renderDocumentsItem)}
+                           </MenuList>
+                         </Frame>
+                       </ProgramsSubmenu>
+                     )}
+                   </div>
+                   <MenuListItem onClick={() => { openWindow("help", { silent: true }); setStartOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.help} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Help</span></MenuListItem>
+                   <MenuListItem onClick={() => { openWindow("run", { silent: true }); setStartOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.run} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Run...</span></MenuListItem>
                    <Separator />
-                   <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Blue Screen</MenuListItem>
-                   <MenuListItem onClick={() => { showConfirm("Shut Down Wenge", "Are you sure you want to shut down?").then((ok) => { if (!ok) return; const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); }); }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Shut Down...</MenuListItem>
+                   <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.bsod} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /><span style={{ flex:1, textAlign:"left" }}>Blue Screen</span></MenuListItem>
+                   <MenuListItem onClick={() => { showConfirm("Shut Down Wenge", "Are you sure you want to shut down?").then((ok) => { if (!ok) return; const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); }); }} style={{ height:26, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /><span style={{ flex:1, textAlign:"left" }}>Shut Down...</span></MenuListItem>
                 </div>
               </div>
             </MenuList>
@@ -1465,7 +1773,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
               data-start-menu
               data-start-button
               $active={startOpen}
-              onClick={(e) => { e.stopPropagation(); setStartOpen(v=>!v); setProgramsOpen(false); playChord(); }}
+              onClick={(e) => { e.stopPropagation(); setStartOpen(v=>!v); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); playChord(); }}
               onMouseDown={(e) => e.stopPropagation()}
             >
               <img src={ICONS.start} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} /> Start
