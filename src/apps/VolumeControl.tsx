@@ -1,14 +1,22 @@
 import { useState, useEffect } from "react";
 import { Button, Slider, Checkbox, Frame } from "react95";
-import { getSoundEnabled, setSoundEnabled } from "../hooks/useSound";
+import { getSoundEnabled, setSoundEnabled, getVolume, setVolume } from "../hooks/useSound";
 
 export function VolumeControlApp(){
-  const [vol,setVol]=useState(70);
+  const [vol,setVol]=useState(()=>getVolume());
   const [muted,setMuted]=useState(()=>!getSoundEnabled());
+  useEffect(()=>{
+    const onVol=(e:Event)=>setVol((e as CustomEvent<number>).detail);
+    const onEn=(e:Event)=>setMuted(!((e as CustomEvent<boolean>).detail));
+    window.addEventListener("wenge:volume", onVol);
+    window.addEventListener("wenge:sound-enabled", onEn);
+    return ()=>{ window.removeEventListener("wenge:volume", onVol); window.removeEventListener("wenge:sound-enabled", onEn); };
+  },[]);
   useEffect(()=> setSoundEnabled(!muted), [muted]);
+  useEffect(()=>{ setVolume(vol); }, [vol]);
   const test=()=>{
     if(muted) return;
-    const a=new Audio("/sounds/chord.wav"); a.volume=vol/100; a.play().catch(()=>{});
+    const a=new Audio("/sounds/chord.wav"); a.volume=(vol/100)*0.9; a.play().catch(()=>{});
   };
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10, alignItems:"center" }}>
@@ -17,7 +25,7 @@ export function VolumeControlApp(){
         <div style={{ height:120, display:"flex", alignItems:"center" }}>
           {/* vertical slider simulated with rotate */}
           <div style={{ transform:"rotate(-90deg)", width:100 }}>
-            <Slider value={vol} min={0} max={100} onChange={(e:any)=>setVol(Number(e.target.value))} />
+            <Slider value={vol} min={0} max={100} onChange={(v: number)=>setVol(Math.max(0, Math.min(100, Math.round(v))))} />
           </div>
         </div>
         <span style={{ fontSize:11 }}>{vol}%</span>

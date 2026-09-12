@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { Button, Frame, Slider } from "react95";
+import { showInfo } from "../components/SystemDialog";
 
 const TRACKS=[ {n:1,t:"02:45"},{n:2,t:"03:12"},{n:3,t:"04:05"},{n:4,t:"03:33"} ];
 
@@ -32,7 +33,7 @@ export function CdPlayerApp(){
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
             <Button size="sm" onClick={()=>setPos(0)}>■</Button>
-            <Button size="sm" disabled>⏏</Button>
+            <Button size="sm" onClick={()=>showInfo("CD Player", "No disc in drive D:.\nInsert an audio CD (mock).\nUse Media Player for WAV files.")}>⏏</Button>
           </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>

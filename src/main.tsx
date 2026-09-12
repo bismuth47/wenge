@@ -54,6 +54,69 @@ const GlobalStyles = createGlobalStyle`
   .w95-appstarting, .w95-appstarting * {
     cursor: url('/cursors/appstarting.png') 0 0, progress !important;
   }
+  /* ===== Windows 95 scrollbars (WebKit / Blink + Firefox fallback) ===== */
+  :root { color-scheme: light; }
+  * { scrollbar-width: auto; scrollbar-color: #c0c0c0 #dfdfdf; }
+  ::-webkit-scrollbar { width: 16px; height: 16px; }
+  ::-webkit-scrollbar-track {
+    background-color: #dfdfdf;
+    background-image: repeating-conic-gradient(#ffffff 0% 25%, #c0c0c0 0% 50%);
+    background-size: 2px 2px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #c0c0c0;
+    border-top: 1px solid #dfdfdf;
+    border-left: 1px solid #dfdfdf;
+    border-right: 1px solid #0a0a0a;
+    border-bottom: 1px solid #0a0a0a;
+    box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080;
+    min-height: 16px;
+    min-width: 16px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #c8c8c8; }
+  ::-webkit-scrollbar-thumb:active {
+    background: #c0c0c0;
+    border-top: 1px solid #0a0a0a;
+    border-left: 1px solid #0a0a0a;
+    border-right: 1px solid #dfdfdf;
+    border-bottom: 1px solid #dfdfdf;
+    box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff;
+  }
+  ::-webkit-scrollbar-button:single-button {
+    background-color: #c0c0c0;
+    border-top: 1px solid #dfdfdf;
+    border-left: 1px solid #dfdfdf;
+    border-right: 1px solid #0a0a0a;
+    border-bottom: 1px solid #0a0a0a;
+    box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080;
+    display: block;
+    width: 16px;
+    height: 16px;
+    background-repeat: no-repeat;
+    background-position: center center;
+  }
+  ::-webkit-scrollbar-button:single-button:active {
+    border-top: 1px solid #0a0a0a;
+    border-left: 1px solid #0a0a0a;
+    border-right: 1px solid #dfdfdf;
+    border-bottom: 1px solid #dfdfdf;
+    box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #ffffff;
+    background-position: calc(50% + 1px) calc(50% + 1px);
+  }
+  ::-webkit-scrollbar-button:single-button:vertical:decrement {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><path d='M8 5 L3 10 H13 Z' fill='black'/></svg>");
+  }
+  ::-webkit-scrollbar-button:single-button:vertical:increment {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><path d='M8 11 L3 6 H13 Z' fill='black'/></svg>");
+  }
+  ::-webkit-scrollbar-button:single-button:horizontal:decrement {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><path d='M5 8 L10 3 V13 Z' fill='black'/></svg>");
+  }
+  ::-webkit-scrollbar-button:single-button:horizontal:increment {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><path d='M11 8 L6 3 V13 Z' fill='black'/></svg>");
+  }
+  ::-webkit-scrollbar-corner { background: #c0c0c0; }
+  ::-webkit-resizer { background: #c0c0c0; }
   body {
     margin: 0;
     padding: 0;

@@ -1,5 +1,6 @@
 import { Button, Fieldset, Separator } from "react95";
 import styled from "styled-components";
+import { showInfo } from "../components/SystemDialog";
 
 const Logo = styled.div`
   font-size: 28px;
@@ -26,7 +27,7 @@ export function AboutWengeApp() {
       </Fieldset>
       <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "center" }}>
         <Button onClick={() => window.open("https://github.com/react95-io/React95", "_blank")}>React95</Button>
-        <Button onClick={() => alert("Wenge OS\n© 1995-2026 Wenge Corp.")}>License</Button>
+        <Button onClick={() => showInfo("Wenge OS License", "Wenge OS\n© 1995-2026 Wenge Corp.\nInspired by Windows 95.\nFree demo — no warranty.")}>License</Button>
       </div>
       <div style={{ marginTop: 12, fontSize: 10, color: "#555" }}>This product is inspired by Microsoft Windows 95</div>
     </div>

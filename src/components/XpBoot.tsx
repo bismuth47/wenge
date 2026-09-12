@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { preloadOsAssets } from "../hooks/usePreload";
 import styled, { keyframes } from "styled-components";
 
 const BootScreen = styled.div`
@@ -107,6 +108,14 @@ const BarCell = styled.div`
   background: linear-gradient(to bottom, #6a6ae6 0%, #3333cc 45%, #1a1a9e 100%);
 `;
 
+const BootStatus = styled.div`
+  margin-top: 14px;
+  font-size: 12px;
+  color: #9a9a9a;
+  letter-spacing: 0.5px;
+  min-height: 16px;
+`;
+
 const Footer = styled.div`
   position: absolute;
   bottom: 28px;
@@ -120,20 +129,51 @@ const Footer = styled.div`
   box-sizing: border-box;
 `;
 
+// Minimum time the boot screen stays up (lets the loader loop read as "working")
+const MIN_BOOT_MS = 4500;
+// Failsafe: never trap the user on boot longer than this
+const MAX_BOOT_MS = 20000;
+
 export function XpBoot({ onDone }: { onDone: () => void }) {
+  const doneRef = useRef(onDone);
   useEffect(() => {
-    const t = window.setTimeout(onDone, 3800);
-    return () => window.clearTimeout(t);
+    doneRef.current = onDone;
   }, [onDone]);
+  const [status, setStatus] = useState("Loading system files...");
+
+  useEffect(() => {
+    let cancelled = false;
+    const started = Date.now();
+    const finish = () => {
+      if (cancelled) return;
+      const wait = Math.max(0, MIN_BOOT_MS - (Date.now() - started));
+      window.setTimeout(() => {
+        if (!cancelled) doneRef.current();
+      }, wait);
+    };
+    // Failsafe: boot can never get stuck
+    const guard = window.setTimeout(() => {
+      if (!cancelled) doneRef.current();
+    }, MAX_BOOT_MS);
+    preloadOsAssets((p) => {
+      if (cancelled) return;
+      if (p.ratio >= 1) setStatus("Starting Wenge 95x...");
+      else if (p.ratio >= 0.6) setStatus("Loading desktop...");
+      else if (p.ratio >= 0.3) setStatus("Loading system files...");
+    }).then(finish, finish);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(guard);
+    };
+  }, []);
 
   return (
     <BootScreen
-      onClick={onDone}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onDone();
+        // swallow keys: boot is not skippable
+        e.preventDefault();
       }}
       tabIndex={0}
-      title="Click to skip"
     >
       <BrandSmall>
         Wenge<sup style={{ fontSize: 9 }}>&reg;</sup>
@@ -154,7 +194,7 @@ export function XpBoot({ onDone }: { onDone: () => void }) {
         </div>
       </BrandMain>
       <EditionText>Professional</EditionText>
-      <BarOuter aria-label="Loading">
+      <BarOuter aria-label="Loading" role="progressbar" aria-live="off">
         <BarTrack>
           <BarCluster>
             <BarCell />
@@ -163,6 +203,7 @@ export function XpBoot({ onDone }: { onDone: () => void }) {
           </BarCluster>
         </BarTrack>
       </BarOuter>
+      <BootStatus>{status}</BootStatus>
       <Footer>
         <span>Copyright &copy; Wenge Corporation</span>
         <span>Wenge 95x</span>

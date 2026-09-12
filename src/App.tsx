@@ -17,10 +17,11 @@ import {
   Radio,
 } from "react95";
 import { WindowFrame } from "./components/WindowFrame";
+import { SystemDialogs, showError, showConfirm, showInfo } from "./components/SystemDialog";
 import { XpBoot } from "./components/XpBoot";
 import { XpLogin } from "./components/XpLogin";
 import { useClock } from "./hooks/useClock";
-import { SOUNDS, useSound } from "./hooks/useSound";
+import { SOUNDS, useSound, getVolume, getSoundEnabled, setSoundEnabled, setVolume } from "./hooks/useSound";
 import { useAnimatedCursor } from "./hooks/useAnimatedCursor";
 import { NotepadApp } from "./apps/Notepad";
 import { MyComputerApp } from "./apps/MyComputer";
@@ -30,6 +31,8 @@ import { AboutWengeApp } from "./apps/AboutWenge";
 import { FileShareApp } from "./apps/FileShare";
 import { ChatApp } from "./apps/ChatApp";
 import { ControlPanelApp } from "./apps/ControlPanel";
+import { ExplorerApp } from "./apps/ExplorerApp";
+import { RunDialog } from "./apps/RunDialog";
 import { MinesweeperApp } from "./apps/Minesweeper";
 import { MediaPlayerApp } from "./apps/MediaPlayer";
 import { WordPadApp } from "./apps/WordPad";
@@ -103,11 +106,11 @@ type WinState = {
 };
 
 // --- Styled ---
-const Desktop = styled.div`
+const Desktop = styled.div<{ $bg?: string }>`
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  background: #008080;
+  background: ${(p) => p.$bg ?? "#008080"};
   position: relative;
   overflow: hidden;
   padding-bottom: 30px;
@@ -223,7 +226,7 @@ const StartButton = styled.button<{ $active?: boolean }>`
   max-height: 22px;
   margin: 0 0 0 4px;
   flex-shrink: 0;
-  align-self: flex-start;
+  align-self: center;
   background: #c0c0c0;
   border-top: 2px solid #fff;
   border-left: 2px solid #fff;
@@ -264,7 +267,101 @@ const StartMenuWrap = styled.div`
   max-height: calc(100vh - 40px);
   overflow: visible;
   cursor: url('/cursors/arrow.png') 0 0, default;
+  /* react95 MenuListItem sets cursor default internally: override it
+     (and its children like img and span) so the Win95 arrow cursor
+     persists over every start-menu row including the Programs submenu */
+  li, li * {
+    cursor: url('/cursors/arrow.png') 0 0, default !important;
+  }
 `;
+
+const VolumePopup = styled.div`
+  position: fixed;
+  bottom: 34px;
+  right: 6px;
+  z-index: 9998;
+  width: 190px;
+  padding: 8px 10px 10px;
+  background: #c0c0c0;
+  border-top: 2px solid #fff;
+  border-left: 2px solid #fff;
+  border-right: 2px solid #808080;
+  border-bottom: 2px solid #808080;
+  box-shadow: inset 0 0 0 1px #dfdfdf, 2px 2px 4px rgba(0,0,0,0.4);
+  box-sizing: border-box;
+`;
+
+// --- Tray speaker: click toggles a small volume slider popup (Win95 style) ---
+function TrayVolume() {
+  const [open, setOpen] = useState(false);
+  const [vol, setVol] = useState(() => getVolume());
+  const [muted, setMuted] = useState(() => !getSoundEnabled());
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onVol = (e: Event) => setVol((e as CustomEvent<number>).detail);
+    const onEn = (e: Event) => setMuted(!((e as CustomEvent<boolean>).detail));
+    window.addEventListener("wenge:volume", onVol);
+    window.addEventListener("wenge:sound-enabled", onEn);
+    return () => { window.removeEventListener("wenge:volume", onVol); window.removeEventListener("wenge:sound-enabled", onEn); };
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [open ]);
+  const applyVol = (v: number) => {
+    const n = Math.max(0, Math.min(100, Math.round(v)));
+    setVol(n);
+    setVolume(n);
+    if (n > 0 && muted) { setMuted(false); setSoundEnabled(true); }
+  };
+  const toggleMute = () => {
+    if (muted || vol === 0) { setMuted(false); setSoundEnabled(true); if (vol === 0) applyVol(70); }
+    else { setMuted(true); setSoundEnabled(false); }
+  };
+  return (
+    <div ref={wrapRef} style={{ position: "relative", display: "flex", alignItems: "center" }}>
+      <img
+        src={ICONS.volume}
+        alt="Volume"
+        title={muted || vol === 0 ? "Muted — click to adjust volume" : `Volume ${vol}% — click to adjust`}
+        width={16}
+        height={16}
+        style={{ imageRendering: "pixelated" as const, cursor: "url('/cursors/arrow.png') 0 0, default", opacity: muted || vol === 0 ? 0.45 : 1 }}
+        onClick={() => setOpen(v => !v)}
+        onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+      />
+      {open && (
+        <VolumePopup onClick={(e) => e.stopPropagation()}>
+          <div style={{ fontSize: 11, fontWeight: "bold", marginBottom: 6 }}>Volume</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Slider
+              value={muted ? 0 : vol}
+              min={0}
+              max={100}
+              onChange={(v: number) => applyVol(v)}
+              style={{ flex: 1 }}
+            />
+            <span style={{ fontSize: 11, minWidth: 34, textAlign: "right" }}>{muted ? "Mute" : `${vol}%`}</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+            <Button size="sm" style={{ flex: 1 }} onClick={toggleMute}>{muted || vol === 0 ? "Unmute" : "Mute"}</Button>
+            <Button size="sm" style={{ flex: 1 }} onClick={() => {
+              const v = muted ? 0 : vol;
+              if (v <= 0) return;
+              try { const a = new Audio(SOUNDS.chord); a.volume = (v / 100) * 0.9; a.play().catch(() => {}); } catch {}
+            }}>Test</Button>
+          </div>
+        </VolumePopup>
+      )}
+    </div>
+  );
+}
 
 // --- App definitions ---
 const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w: number; h: number; component: React.ReactNode }> = {
@@ -298,8 +395,8 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   "media-player": { title: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer, w: 520, h: 460, component: <MediaPlayerApp /> },
   paint: { title: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
   calc: { title: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
-  explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 520, h: 360, component: <ExplorerApp /> },
-  run: { title: "Run", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 360, h: 180, component: <RunApp /> },
+  explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 560, h: 400, component: <div /> },
+  run: { title: "Run", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 380, h: 200, component: <div /> },
 };
 
 function PaintApp() {
@@ -393,67 +490,6 @@ function CalcApp() {
   );
 }
 
-function ExplorerApp() {
-  const [path, setPath] = useState("C:\\Wenge\\Documents");
-  const files = [
-    { name: "README.txt", size: "2 KB", type: "Text" },
-    { name: "Wenge.bmp", size: "256 KB", type: "Bitmap" },
-    { name: "Setup.exe", size: "1.2 MB", type: "Application" },
-    { name: "Documents", size: "", type: "Folder" },
-  ];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        <span style={{ fontSize: 11 }}>Location:</span>
-        <TextInput value={path} onChange={(e) => setPath(e.target.value)} style={{ flex: 1 }} />
-        <Button size="sm">Go</Button>
-      </div>
-      <div style={{ display: "flex", gap: 6, height: 200 }}>
-        <Frame variant="well" style={{ width: 120, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> Desktop</div>
-          <div style={{ paddingLeft: 12, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.myComputer} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> My Computer</div>
-          <div style={{ paddingLeft: 12, background: "#000080", color: "#fff", display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderOpen} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {path.split("\\").pop()}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.recycle} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> Recycle Bin</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileShare} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> Network</div>
-        </Frame>
-        <Frame variant="well" style={{ flex: 1, background: "#fff", padding: 0, overflow: "auto" }}>
-          <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-            <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
-            <tbody>
-              {files.map(f => <tr key={f.name} style={{ borderTop: "1px solid #c0c0c0" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{f.size}</td><td style={{ textAlign: "center" }}>{f.type}</td></tr>)}
-            </tbody>
-          </table>
-        </Frame>
-      </div>
-      <ProgressBar value={34} style={{ height: 10 }} />
-    </div>
-  );
-}
-
-function RunApp({ onClose }: { onClose?: () => void }) {
-  const [cmd, setCmd] = useState("");
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <img src={ICONS.run} alt="" width={32} height={32} style={{ imageRendering: "pixelated" as const, flexShrink: 0 }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
-        <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-          Type the name of a program, folder, document, or Internet resource,<br />
-          and Wenge will open it for you.
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 11, width: 70 }}>Name:</span>
-        <TextInput value={cmd} onChange={(e) => setCmd(e.target.value)} placeholder="e.g.: notepad, calc, mspaint" style={{ flex: 1 }} />
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-        <Button onClick={() => { alert(`Run: ${cmd || "(empty)"}`); onClose?.(); }}>OK</Button>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button>Browse...</Button>
-      </div>
-    </div>
-  );
-}
-
 function DemoControls() {
   const [checked, setChecked] = useState(true);
   const [radio, setRadio] = useState("a");
@@ -463,9 +499,9 @@ function DemoControls() {
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Fieldset label="Retro UI Parts">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <Button>Default</Button>
+          <Button onClick={() => showInfo("Button", `Default pressed${text ? ` — input: ${text}` : ""}`)}>Default</Button>
           <Button disabled>Disabled</Button>
-          <Button active>Pressed</Button>
+          <Button active onClick={() => showInfo("Button", "Pressed state demo.")}>Pressed</Button>
         </div>
         <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
           <Checkbox checked={checked} onChange={() => setChecked(!checked)} value="cb1" label="Checkbox" />
@@ -483,9 +519,9 @@ function DemoControls() {
         <div style={{ fontSize: 11 }}>Demonstrates GroupBox / Fieldset / Frame / Separator</div>
         <Separator style={{ margin: "8px 0" }} />
         <div style={{ display: "flex", gap: 6 }}>
-          <Button size="sm">Small</Button>
-          <Button size="sm">Medium</Button>
-          <Button size="sm">Large</Button>
+          <Button size="sm" onClick={() => showInfo("Size", "Small button pressed.")}>Small</Button>
+          <Button size="sm" onClick={() => showInfo("Size", "Medium button pressed.")}>Medium</Button>
+          <Button size="sm" onClick={() => showInfo("Size", "Large button pressed.")}>Large</Button>
         </div>
       </GroupBox>
     </div>
@@ -549,6 +585,14 @@ const [programsOpen, setProgramsOpen] = useState(false);
 const [showBsod, setShowBsod] = useState(false);
   // XP-style boot -> login -> desktop phases. Reload always restarts from "boot" (no persistence by design).
   const [phase, setPhase] = useState<"boot" | "login" | "desktop">("boot");
+  const [desktopBg, setDesktopBg] = useState(() => {
+    try { return localStorage.getItem("wenge_bg") ?? "#008080"; } catch { return "#008080"; }
+  });
+  useEffect(() => {
+    const onBg = (e: Event) => setDesktopBg((e as CustomEvent<string>).detail);
+    window.addEventListener("wenge:bg", onBg);
+    return () => window.removeEventListener("wenge:bg", onBg);
+  }, []);
 const maxZ = useRef(20);
 const [startupPlayed, setStartupPlayed] = useState(false);
 const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; icon: string; iconSrc: string }[]>(()=>{
@@ -1173,6 +1217,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
 
   return (
     <Desktop
+      $bg={desktopBg}
       ref={desktopRef}
       onClick={() => { if(suppressDesktopClick.current){ suppressDesktopClick.current=false; return; } setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setContextMenu(null); }}
       onMouseDown={handleDesktopMouseDown}
@@ -1263,7 +1308,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Line up Icons</MenuListItem>
             <Separator />
             <MenuListItem onClick={()=>{ setContextMenu(null); location.reload(); }}>Refresh</MenuListItem>
-            <MenuListItem onClick={()=>{ setContextMenu(null); alert("Wenge 95\nProperties: 800x600, 256 colors"); }}>Properties</MenuListItem>
+            <MenuListItem onClick={()=>{ setContextMenu(null); showInfo("Wenge 95", "Wenge 95\nProperties: 800x600, 256 colors"); }}>Properties</MenuListItem>
           </MenuList>
         </ContextMenu>
       )}
@@ -1273,7 +1318,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         const def = APP_DEFS[w.id];
         let comp: React.ReactNode = def.component;
         if (w.id === "recycle") comp = <RecycleBinApp playSound={playDing} />;
-        if (w.id === "run") comp = <RunApp onClose={() => closeWindow("run")} />;
+        if (w.id === "explorer") comp = <ExplorerApp onOpenApp={(id) => openWindow(id as AppId, { silent: true })} />;
+        if (w.id === "run") comp = <RunDialog onClose={() => closeWindow("run")} onRun={(id) => openWindow(id as AppId, { silent: true })} />;
         if (w.id === "notepad") {
           comp = (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1308,6 +1354,9 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           </WindowFrame>
         );
       })}
+
+      {/* In-OS modal dialogs (Win95 style) — always on top of windows */}
+      <SystemDialogs />
 
       {/* BSOD */}
       {showBsod && (
@@ -1400,7 +1449,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                    <MenuListItem onClick={() => { openWindow("run", { silent: true }); setStartOpen(false); }} style={{ height:32, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.run} alt="" width={16} height={16} style={{ marginRight: 8 }} /> Run...</MenuListItem>
                    <Separator />
                    <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.bsod} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Blue Screen</MenuListItem>
-                   <MenuListItem onClick={() => { if (confirm("Shut down Wenge?")) { const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); } }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Shut Down...</MenuListItem>
+                   <MenuListItem onClick={() => { showConfirm("Shut Down Wenge", "Are you sure you want to shut down?").then((ok) => { if (!ok) return; const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); }); }} style={{ height:26, cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={16} height={16} style={{ marginRight: 8, imageRendering: "pixelated" as const }} />Shut Down...</MenuListItem>
                 </div>
               </div>
             </MenuList>
@@ -1410,8 +1459,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
 
       {/* Taskbar */}
       <Taskbar data-taskbar>
-        <Toolbar style={{ justifyContent: "space-between", alignItems: "flex-start", padding: "2px 4px 0 4px", height: "100%", boxSizing: "border-box", flexWrap: "nowrap", minHeight: 0 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 4, height: "100%", minHeight: 0, paddingTop: 1 }}>
+        <Toolbar style={{ justifyContent: "space-between", alignItems: "center", padding: "2px 4px", height: "100%", boxSizing: "border-box", flexWrap: "nowrap", minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, height: "100%", minHeight: 0 }}>
             <StartButton
               data-start-menu
               data-start-button
@@ -1421,8 +1470,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             >
               <img src={ICONS.start} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} /> Start
             </StartButton>
-            <Separator orientation="vertical" size="24px" style={{ margin: "0 4px" }} />
-            <div style={{ display: "flex", gap: 2, flexWrap: "nowrap", overflow: "hidden" }}>
+            <Separator orientation="vertical" size="20px" style={{ margin: "0 4px", alignSelf: "center" }} />
+            <div style={{ display: "flex", gap: 2, flexWrap: "nowrap", overflow: "hidden", alignItems: "center" }}>
               {windows.filter(w => w.isOpen).map(w => (
                 <Button
                   key={w.id}
@@ -1431,7 +1480,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                     if (w.isMinimized || focusedId !== w.id) focusWindow(w.id);
                     else minimizeWindow(w.id);
                   }}
-                  style={{ minWidth: 90, maxWidth: 130, justifyContent: "flex-start", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  style={{ height: 22, minHeight: 22, maxHeight: 22, paddingTop: 0, paddingBottom: 0, minWidth: 90, maxWidth: 130, justifyContent: "flex-start", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 >
                   <img
                     src={w.iconSrc}
@@ -1451,8 +1500,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
               ))}
             </div>
           </div>
-          <Frame variant="well" style={{ padding: "2px 6px", display: "flex", alignItems: "center", gap: 8, minWidth: 90, justifyContent: "flex-end" }}>
-            <img src={ICONS.volume} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e)=>((e.currentTarget as HTMLImageElement).style.display="none")} />
+          <Frame variant="well" style={{ padding: "2px 6px", display: "flex", alignItems: "center", gap: 8, minWidth: 90, justifyContent: "flex-end", position: "relative" }}>
+            <TrayVolume />
             <span style={{ fontSize: 11 }}>{clock.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
           </Frame>
         </Toolbar>

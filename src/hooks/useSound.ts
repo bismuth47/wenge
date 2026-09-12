@@ -51,7 +51,8 @@ export function useSound(src: string, volume = 0.5) {
         audioRef.current.preload = "auto";
       }
       const audio = audioRef.current;
-      audio.volume = volume;
+      // scale by the global tray volume (0..100, default 70)
+      audio.volume = volume * (getStoredVolume() / 100);
       audio.currentTime = 0;
       const p = audio.play();
       if (p && typeof (p as Promise<void>).catch === "function") {
@@ -74,8 +75,32 @@ export function useSound(src: string, volume = 0.5) {
 
 export function setSoundEnabled(enabled: boolean) {
   try { localStorage.setItem("wenge_sound_enabled", enabled ? "1" : "0"); } catch {}
+  try { window.dispatchEvent(new CustomEvent("wenge:sound-enabled", { detail: enabled })); } catch {}
 }
 export function getSoundEnabled(): boolean { return isSoundEnabled(); }
+
+function getStoredVolume(): number {
+  try {
+    const v = localStorage.getItem("wenge_volume");
+    if (v === null) return 70;
+    const n = Number(v);
+    if (Number.isFinite(n)) return Math.max(0, Math.min(100, Math.round(n)));
+  } catch {}
+  return 70;
+}
+
+export function getVolume(): number { return getStoredVolume(); }
+
+export function setVolume(vol: number) {
+  const v = Math.max(0, Math.min(100, Math.round(vol)));
+  try { localStorage.setItem("wenge_volume", String(v)); } catch {}
+  try { window.dispatchEvent(new CustomEvent("wenge:volume", { detail: v })); } catch {}
+  // volume 0 behaves like mute for all effects
+  if (v === 0) {
+    try { localStorage.setItem("wenge_sound_enabled", "0"); } catch {}
+    try { window.dispatchEvent(new CustomEvent("wenge:sound-enabled", { detail: false })); } catch {}
+  }
+}
 
 export const SOUNDS = {
   startup: "/sounds/Startup.wav",

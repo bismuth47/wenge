@@ -1,9 +1,13 @@
 import { useState, useEffect } from "react";
 import { Button, Checkbox, Fieldset, Radio, Select, Slider } from "react95";
 import { getSoundEnabled, setSoundEnabled, SOUNDS } from "../hooks/useSound";
+import { showInfo } from "../components/SystemDialog";
 
 export function ControlPanelApp() {
-  const [bg, setBg] = useState("#008080");
+  const [bg, setBg] = useState(() => {
+    try { return localStorage.getItem("wenge_bg") ?? "#008080"; } catch { return "#008080"; }
+  });
+  const [res, setRes] = useState("800x600");
   const [volume, setVolume] = useState(70);
   const [soundEnabled, setSoundEnabledState] = useState(() => getSoundEnabled());
   useEffect(() => { setSoundEnabled(soundEnabled); }, [soundEnabled]);
@@ -22,12 +26,12 @@ export function ControlPanelApp() {
             ]}
             width={160}
           />
-          <Button onClick={() => (document.body.style.background = bg)}>Apply</Button>
+          <Button onClick={() => { try { localStorage.setItem("wenge_bg", bg); } catch {} try { window.dispatchEvent(new CustomEvent("wenge:bg", { detail: bg })); } catch {} document.body.style.background = bg; }}>Apply</Button>
           <div style={{ width: 24, height: 18, background: bg, border: "2px inset #fff" }} />
         </div>
         <div style={{ marginTop: 8, display: "flex", gap: 12 }}>
-          <Radio checked name="res" value="800x600" label="800 x 600" />
-          <Radio checked={false} name="res" value="1024x768" label="1024 x 768" />
+          <Radio checked={res === "800x600"} onChange={() => setRes("800x600")} name="res" value="800x600" label="800 x 600" />
+          <Radio checked={res === "1024x768"} onChange={() => setRes("1024x768")} name="res" value="1024x768" label="1024 x 768" />
         </div>
       </Fieldset>
 
@@ -48,9 +52,9 @@ export function ControlPanelApp() {
 
       <Fieldset label="System">
         <div style={{ display: "flex", gap: 8 }}>
-          <Button>Hardware</Button>
-          <Button>Network</Button>
-          <Button>Password</Button>
+          <Button onClick={() => showInfo("Hardware", "Device Manager\n- WengeChip 133MHz\n- 32MB RAM\n- VGA Display\nAll devices working properly.")}>Hardware</Button>
+          <Button onClick={() => showInfo("Network", "Network: WENGE workgroup\nAdapter: NE2000 Compatible\nStatus: Connected (mock)")}>Network</Button>
+          <Button onClick={() => showInfo("Password", "Password protected.\nHint: check README (mock).\nChange password is disabled in demo.")}>Password</Button>
         </div>
       </Fieldset>
     </div>

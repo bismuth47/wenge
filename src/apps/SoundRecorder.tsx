@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { Button, Frame, ProgressBar } from "react95";
+import { showError, showInfo } from "../components/SystemDialog";
 
 export function SoundRecorderApp(){
   const [recording,setRecording]=useState(false);
@@ -23,7 +24,7 @@ export function SoundRecorderApp(){
       mediaRef.current=mr;
       setRecording(true); setSecs(0);
       timerRef.current=window.setInterval(()=>setSecs(s=>s+1),1000);
-    }catch{ alert("Microphone permission denied or not available"); }
+    }catch{ showError("Sound Recorder", "Microphone permission denied or not available."); }
   };
   const stopRec=()=>{
     mediaRef.current?.stop();
@@ -61,8 +62,9 @@ export function SoundRecorderApp(){
         <ProgressBar value={Math.min(100, secs*4)} style={{ width:"100%", height:10 }} />
         <audio ref={audioRef} hidden />
       </Frame>
-      <div style={{ fontSize:11, display:"flex", gap:6, flexWrap:"wrap" }}>
-        <Button size="sm" onClick={()=>{ setHasAudio(false); setSecs(0); if(urlRef.current){ URL.revokeObjectURL(urlRef.current); urlRef.current=null; } if(audioRef.current) audioRef.current.src=""; }}>New</Button>
+      <div style={{ fontSize:11, display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+        <Button size="sm" onClick={()=>{ setHasAudio(false); setSecs(0); setPlaying(false); if(urlRef.current){ URL.revokeObjectURL(urlRef.current); urlRef.current=null; } if(audioRef.current){ try{audioRef.current.pause();}catch{} audioRef.current.src=""; } }}>New</Button>
+        <Button size="sm" disabled={!hasAudio} onClick={()=>showInfo("Sound Recorder", `Length: ${secs}s\nFormat: WAV 22kHz mono (mock)`)}>Info</Button>
         <span style={{ fontSize:10, color:"#808080" }}>Uses microphone. Grant permission to record. Save as WAV.</span>
       </div>
       <style>{`@keyframes blink{50%{opacity:0}}`}</style>
