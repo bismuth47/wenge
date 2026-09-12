@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { Frame } from "react95";
-import { consumePendingVfsFile } from "../lib/vfs/openWith";
 
 type FSNode = { type:"dir"|"file"; name:string; children?:FSNode[]; content?:string };
 
