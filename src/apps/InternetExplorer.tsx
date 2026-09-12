@@ -214,6 +214,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       setError(null);
       setDdgBlocked(null);
       setFallbackNotice(null);
+      setVfsHtml(null);
       setStatusText(`Opening ${targetUrl}...`);
       setLoading(true);
 
@@ -281,6 +282,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setError(null);
     setDdgBlocked(null);
     setFallbackNotice(null);
+    setVfsHtml(null);
     setStatusText(`Opening ${url}...`);
     setLoading(true);
     setCurrentUrl(url);
@@ -296,6 +298,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setError(null);
     setDdgBlocked(null);
     setFallbackNotice(null);
+    setVfsHtml(null);
     setStatusText(`Opening ${url}...`);
     setLoading(true);
     setCurrentUrl(url);
