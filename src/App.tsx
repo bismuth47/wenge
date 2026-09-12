@@ -68,6 +68,7 @@ import {
 } from "./lib/desktopDocs";
 import { VFS_CHANGED_EVENT } from "./lib/vfs/store";
 import { setPendingVfsFile, vfsOpenTarget } from "./lib/vfs/openWith";
+import type { VfsFile } from "./lib/vfs/types";
 
 // --- Types ---
 type AppId =
@@ -1637,7 +1638,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         const def = APP_DEFS[w.id];
         let comp: React.ReactNode = def.component;
         if (w.id === "recycle") comp = <RecycleBinApp playSound={playDing} />;
-        if (w.id === "explorer") comp = <ExplorerApp onOpenApp={(id) => openWindow(id as AppId, { silent: true })} />;
+        if (w.id === "explorer") comp = <ExplorerApp onOpenApp={(id, file) => { if (file) { const doc: DesktopDoc = { id: file.id, name: file.name, mime: file.mime || "", size: file.size, createdAt: file.createdAt, updatedAt: file.updatedAt, blob: file.blob, sourceUrl: file.sourceUrl, sourceR2Key: file.sourceR2Key }; setVfsFileByApp((prev) => ({ ...prev, [id]: doc })); } openWindow(id as AppId, { silent: true }); }} />;
         if (w.id === "run") comp = <RunDialog onClose={() => closeWindow("run")} onRun={(id) => openWindow(id as AppId, { silent: true })} />;
         if (w.id === "notepad") {
           const f = vfsFileByApp["notepad"];
@@ -1660,6 +1661,25 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         if (w.id === "image-viewer") {
           const f = vfsFileByApp["image-viewer"];
           comp = <ImageViewerApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />;
+        }
+        if (w.id === "ie") {
+          const f = vfsFileByApp["ie"];
+          const ieFile: VfsFile | null = f
+            ? {
+                id: f.id,
+                path: `C:/Desktop/${f.name}`,
+                name: f.name,
+                dir: "C:/Desktop",
+                mime: f.mime,
+                size: f.size,
+                createdAt: f.createdAt,
+                updatedAt: f.updatedAt,
+                blob: f.blob,
+                sourceUrl: f.sourceUrl,
+                sourceR2Key: f.sourceR2Key,
+              }
+            : null;
+          comp = <InternetExplorerApp key={f ? `vfs-${f.id}` : "blank"} file={ieFile} />;
         }
         return (
           <WindowFrame

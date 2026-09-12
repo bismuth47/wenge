@@ -11,12 +11,14 @@ export type DesktopDoc = {
   mime: string;
   size: number;
   createdAt: string;
+  updatedAt: string;
   sourceR2Key?: string;
+  sourceUrl?: string;
   blob: Blob;
 };
 
 function toLegacy(f: VfsFile): DesktopDoc {
-  return { id: f.id, name: f.path.replace(/^C:\/Desktop\//i, "") || f.name, mime: f.mime, size: f.size, createdAt: f.createdAt, sourceR2Key: f.sourceR2Key, blob: f.blob };
+  return { id: f.id, name: f.path.replace(/^C:\/Desktop\//i, "") || f.name, mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.updatedAt, sourceR2Key: f.sourceR2Key, sourceUrl: f.sourceUrl, blob: f.blob };
 }
 
 /** Re-exported so Desktop state can also subscribe to VFS changes. */

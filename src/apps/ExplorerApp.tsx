@@ -23,6 +23,7 @@ import {
 } from "../lib/downloads";
 import { handleDownload } from "../lib/downloadTarget";
 import { deleteVfsFile, useVfsDirectory } from "../lib/vfs/store";
+import type { VfsFile } from "../lib/vfs/types";
 import { setPendingVfsFile, vfsOpenTarget } from "../lib/vfs/openWith";
 import { fromExplorerPath, normalizeVfsPath } from "../lib/vfs/path";
 
@@ -88,7 +89,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
+export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any, file?: VfsFile) => void }) {
   const [path, setPath] = useState("C:\\Wenge\\Documents");
   const [input, setInput] = useState("C:\\Wenge\\Documents");
   const [selected, setSelected] = useState<string | null>(null);
@@ -176,12 +177,10 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
     }
     const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "ie" ? "ie" : "media-player";
     setPendingVfsFile(f);
-    // App.tsx側でvfsFileByAppにDesktopDocしか渡せないため、Downloads/Documentsからの
-    // オープンはpending経由（マウント時にconsume）で対応する
     try {
       (window as any).__wengePendingVfs = f;
     } catch {}
-    onOpenApp?.(appId);
+    onOpenApp?.(appId, f);
   };
   const deleteVfsEntry = async (id: string) => {
     const f = vfsFiles.find((x) => x.id === id);
