@@ -33,14 +33,14 @@ const BrandMain = styled.div`
   line-height: 1;
 `;
 
-const WindowsText = styled.span`
+const BrandText = styled.span`
   font-size: 52px;
   font-weight: 400;
   letter-spacing: -1px;
   color: #fff;
 `;
 
-const XpText = styled.span`
+const Mark95x = styled.span`
   font-size: 52px;
   font-weight: 800;
   color: #e8631c;
@@ -66,41 +66,45 @@ const Flag = styled.div`
   margin-top: 2px;
 `;
 
-const loadBar = keyframes`
-  0% { transform: translateX(-140px); }
-  100% { transform: translateX(190px); }
+// --- Authentic XP loader ---
+// Real XP boot bar does NOT glide: blue cells jump forward one cell-width
+// per tick (~10 ticks/sec), like a chunky conveyor. steps(17) over a
+// travel of exactly 17 cell-pitches (17 x 11px) reproduces that stepping.
+const xpMarch = keyframes`
+  from { transform: translateX(-33px); }
+  to { transform: translateX(154px); }
 `;
 
 const BarOuter = styled.div`
   margin-top: 42px;
-  width: 180px;
-  height: 16px;
-  border: 1px solid #8a8a8a;
-  border-radius: 3px;
+  width: 156px;
+  height: 17px;
+  border: 1px solid #808080;
+  border-radius: 2px;
   padding: 2px;
   box-sizing: border-box;
   background: #000;
   overflow: hidden;
 `;
 
-const BarInner = styled.div`
+const BarTrack = styled.div`
   position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
 `;
 
-const BarBlocks = styled.div`
+const BarCluster = styled.div`
   display: flex;
-  gap: 3px;
-  animation: ${loadBar} 1.6s linear infinite;
+  gap: 2px;
   width: max-content;
+  animation: ${xpMarch} 1.7s steps(17) infinite;
 `;
 
-const BarBlock = styled.div`
-  width: 12px;
-  height: 10px;
-  background: linear-gradient(to bottom, #8ba7e8 0%, #245edc 50%, #1c46a8 100%);
+const BarCell = styled.div`
+  width: 9px;
+  height: 11px;
+  background: linear-gradient(to bottom, #6a6ae6 0%, #3333cc 45%, #1a1a9e 100%);
 `;
 
 const Footer = styled.div`
@@ -132,7 +136,7 @@ export function XpBoot({ onDone }: { onDone: () => void }) {
       title="Click to skip"
     >
       <BrandSmall>
-        Microsoft<sup style={{ fontSize: 9 }}>&reg;</sup> Windows<sup style={{ fontSize: 9 }}>&reg;</sup>
+        Wenge<sup style={{ fontSize: 9 }}>&reg;</sup>
       </BrandSmall>
       <BrandMain>
         <Flag aria-hidden>
@@ -145,23 +149,23 @@ export function XpBoot({ onDone }: { onDone: () => void }) {
           </svg>
         </Flag>
         <div>
-          <WindowsText>Windows</WindowsText>
-          <XpText>xp</XpText>
+          <BrandText>Wenge</BrandText>
+          <Mark95x>95x</Mark95x>
         </div>
       </BrandMain>
-      <EditionText>wenge Edition</EditionText>
+      <EditionText>Professional</EditionText>
       <BarOuter aria-label="Loading">
-        <BarInner>
-          <BarBlocks>
-            <BarBlock />
-            <BarBlock />
-            <BarBlock />
-          </BarBlocks>
-        </BarInner>
+        <BarTrack>
+          <BarCluster>
+            <BarCell />
+            <BarCell />
+            <BarCell />
+          </BarCluster>
+        </BarTrack>
       </BarOuter>
       <Footer>
-        <span>Copyright &copy; Microsoft Corporation</span>
-        <span>wenge</span>
+        <span>Copyright &copy; Wenge Corporation</span>
+        <span>Wenge 95x</span>
       </Footer>
     </BootScreen>
   );
