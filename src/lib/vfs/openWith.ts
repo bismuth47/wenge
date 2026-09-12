@@ -1,8 +1,10 @@
 import type { VfsFile } from "./types";
 
-export type VfsOpenTarget = "notepad" | "wordpad" | "image-viewer" | "media-player" | "preview" | "explorer";
+export type VfsOpenTarget = "notepad" | "wordpad" | "image-viewer" | "media-player" | "preview" | "explorer" | "ie" | "msdos";
 
-const TEXT_EXTS = new Set(["txt", "md", "markdown", "json", "js", "ts", "tsx", "css", "html", "xml", "csv", "log", "ini", "bat"]);
+const TEXT_EXTS = new Set(["txt", "md", "markdown", "json", "js", "ts", "tsx", "css", "xml", "csv", "log", "ini"]);
+const HTML_EXTS = new Set(["html"]);
+const BAT_EXTS = new Set(["bat"]);
 const DOC_EXTS = new Set(["doc", "rtf"]);
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "flac", "mid", "midi"]);
@@ -14,6 +16,8 @@ export function vfsOpenTarget(file: VfsFile): VfsOpenTarget {
   if (mime.startsWith("image/") || IMAGE_EXTS.has(ext)) return "image-viewer";
   if (mime.startsWith("audio/") || mime.startsWith("video/") || AUDIO_EXTS.has(ext) || VIDEO_EXTS.has(ext)) return "media-player";
   if (mime === "application/pdf" || ext === "pdf") return "preview";
+  if (HTML_EXTS.has(ext)) return "ie";
+  if (BAT_EXTS.has(ext)) return "msdos";
   if (mime.startsWith("text/") || TEXT_EXTS.has(ext)) return "notepad";
   if (DOC_EXTS.has(ext)) return "wordpad";
   return "explorer";

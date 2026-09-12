@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Frame } from "react95";
+import { consumePendingVfsFile } from "../lib/vfs/openWith";
 
 type FSNode = { type:"dir"|"file"; name:string; children?:FSNode[]; content?:string };
 
@@ -28,12 +29,28 @@ function findNode(root:FSNode, path:string[]):FSNode|null{
   return cur;
 }
 
-export function MsDosApp(){
+export function MsDosApp({
+  file,
+}: {
+  file?: any;
+}) {
   const [history,setHistory]=useState<string[]>(["Microsoft(R) Windows 95","(C)Copyright Microsoft Corp 1981-1995.","", "Type HELP for help.",""]);
   const [input,setInput]=useState("");
   const [cwd,setCwd]=useState<string[]>(["WENGE"]);
   const ref=useRef<HTMLDivElement>(null);
   const inputRef=useRef<HTMLInputElement>(null);
+
+  // ファイルから渡されたコンテンツがあれば表示
+  useEffect(() => {
+    if (file?.blob) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        setHistory(prev => [...prev, "", `=== ${file.name} ===`, "", ...text.split('\n'), ""]);
+      };
+      reader.readAsText(file.blob);
+    }
+  }, [file]);
 
   useEffect(()=>{ ref.current?.scrollTo(0, ref.current.scrollHeight); },[history]);
 

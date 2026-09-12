@@ -1013,7 +1013,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       return;
     }
-    const appId = (target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : "media-player") as AppId;
+    const appId = (target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "media-player" ? "media-player" : target === "ie" ? "ie" : target === "msdos" ? "msdos" : "explorer") as AppId;
     // mount時に各アプリがconsumeできるようpendingにも積む + propで確実に渡す
     setPendingVfsFile(vfsFile as never);
     setVfsFileByApp((prev) => ({ ...prev, [appId]: doc }));

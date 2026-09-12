@@ -31,7 +31,7 @@ export type ExplorerOpenId = "notepad"|"wordpad"|"paint"|"calc"|"clock"|"msdos"|
 type FEntry = { name: string; size: string; type: string; app?: string };
 
 const FS: Record<string, { folders: string[]; files: FEntry[] }> = {
-  "C:\\": { folders: ["Wenge","Windows","Program Files"], files: [{name:"AUTOEXEC.BAT",size:"1 KB",type:"Batch"},{name:"CONFIG.SYS",size:"1 KB",type:"System"}] },
+  "C:\\": { folders: ["Wenge","Windows","Program Files"], files: [{name:"AUTOEXEC.BAT",size:"1 KB",type:"Batch",app:"msdos"}, {name:"CONFIG.SYS",size:"1 KB",type:"System"}] },
   "C:\\Wenge": { folders: ["Documents","Media","Games","Downloads"], files: [{name:"README.txt",size:"2 KB",type:"Text",app:"notepad"},{name:"Wenge.bmp",size:"256 KB",type:"Bitmap",app:"paint"},{name:"Setup.exe",size:"1.2 MB",type:"Application"}] },
   "C:\\Wenge\\Documents": { folders: [], files: [{name:"README.txt",size:"2 KB",type:"Text",app:"notepad"},{name:"Report.doc",size:"45 KB",type:"Document",app:"wordpad"},{name:"Budget.xls",size:"32 KB",type:"Sheet"}] },
   "C:\\Wenge\\Media": { folders: [], files: [{name:"chimes.wav",size:"120 KB",type:"Sound",app:"media-player"},{name:"tada.wav",size:"80 KB",type:"Sound",app:"media-player"},{name:"Wenge.bmp",size:"256 KB",type:"Bitmap",app:"paint"}] },
@@ -40,7 +40,7 @@ const FS: Record<string, { folders: string[]; files: FEntry[] }> = {
   "C:\\Windows\\System": { folders: [], files: [{name:"SHELL.DLL",size:"120 KB",type:"System"}] },
   "C:\\Windows\\Fonts": { folders: [], files: [{name:"MS Sans Serif",size:"",type:"Font"}] },
   "C:\\Windows\\Help": { folders: [], files: [{name:"WENGE.HLP",size:"60 KB",type:"Help",app:"help"}] },
-  "C:\\Program Files": { folders: ["Internet Explorer","Media Player"], files: [{name:"README.txt",size:"1 KB",type:"Text",app:"notepad"}] },
+  "C:\\Program Files": { folders: ["Internet Explorer","Media Player"], files: [{name:"README.txt",size:"1 KB",type:"Text",app:"notepad"},{name:"readme.htm",size:"1 KB",type:"Web page",app:"ie"}] },
 };
 
 export function normExplorerKey(p: string): string {
