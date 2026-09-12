@@ -174,7 +174,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       return;
     }
-    const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : "media-player";
+    const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "ie" ? "ie" : "media-player";
     setPendingVfsFile(f);
     // App.tsx側でvfsFileByAppにDesktopDocしか渡せないため、Downloads/Documentsからの
     // オープンはpending経由（マウント時にconsume）で対応する

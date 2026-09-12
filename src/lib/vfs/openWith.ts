@@ -13,10 +13,10 @@ const VIDEO_EXTS = new Set(["mp4", "webm", "ogv", "mov"]);
 export function vfsOpenTarget(file: VfsFile): VfsOpenTarget {
   const mime = (file.mime || "").toLowerCase();
   const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (HTML_EXTS.has(ext)) return "ie";
   if (mime.startsWith("image/") || IMAGE_EXTS.has(ext)) return "image-viewer";
   if (mime.startsWith("audio/") || mime.startsWith("video/") || AUDIO_EXTS.has(ext) || VIDEO_EXTS.has(ext)) return "media-player";
   if (mime === "application/pdf" || ext === "pdf") return "preview";
-  if (HTML_EXTS.has(ext)) return "ie";
   if (BAT_EXTS.has(ext)) return "msdos";
   if (mime.startsWith("text/") || TEXT_EXTS.has(ext)) return "notepad";
   if (DOC_EXTS.has(ext)) return "wordpad";

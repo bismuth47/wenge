@@ -3,6 +3,8 @@ import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95
 import { showError } from "../components/SystemDialog";
 import { getVfsDirByExt } from "../lib/downloadTarget";
 import { saveUrlToVfs } from "../lib/vfs/download";
+import type { VfsFile } from "../lib/vfs/types";
+import { consumePendingVfsFile } from "../lib/vfs/openWith";
 
 const QUICK_LINKS = [
   "https://www.bing.com/",
@@ -71,7 +73,7 @@ function fileNameForSave(pageUrl: string, disposition: string | null): string {
 
 type BlockInfo = { query: string; code: string | null; email: string | null; originalUrl: string };
 
-export function InternetExplorerApp() {
+export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const [address, setAddress] = useState("");
   const [currentUrl, setCurrentUrl] = useState("");
   const [historyStack, setHistoryStack] = useState<string[]>([]);
@@ -85,6 +87,8 @@ export function InternetExplorerApp() {
   const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [vfsHtml, setVfsHtml] = useState<string | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const probeAbortRef = useRef<AbortController | null>(null);
@@ -93,11 +97,39 @@ export function InternetExplorerApp() {
     hIndexRef.current = hIndex;
   }, [hIndex]);
 
-  const iframeSrc = currentUrl
-    ? useProxy
-      ? `/api/proxy?url=${encodeURIComponent(currentUrl)}`
-      : currentUrl
-    : "about:blank";
+  useEffect(() => {
+    const pending = file ?? consumePendingVfsFile();
+    if (!pending?.blob) return;
+    const url = URL.createObjectURL(pending.blob);
+    blobUrlRef.current = url;
+    pending.blob.text().then((text) => {
+      setVfsHtml(text);
+      setCurrentUrl("");
+      setAddress(pending.name);
+      setStatusText(`VFS: ${pending.name}`);
+    }).catch(() => {
+      setError("HTMLファイルの読み込みに失敗しました。");
+    });
+    return () => {
+      URL.revokeObjectURL(url);
+      if (blobUrlRef.current === url) blobUrlRef.current = null;
+    };
+  }, [file]);
+
+  const iframeSrc = vfsHtml
+    ? "about:blank"
+    : currentUrl
+      ? useProxy
+        ? `/api/proxy?url=${encodeURIComponent(currentUrl)}`
+        : currentUrl
+      : "about:blank";
+
+  useEffect(() => {
+    if (!vfsHtml) return;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    iframe.srcdoc = vfsHtml;
+  }, [vfsHtml]);
 
   const doProbe = useCallback(async (targetUrl: string) => {
     probeAbortRef.current?.abort();
