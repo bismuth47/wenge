@@ -398,7 +398,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           <Button size="sm" onClick={onMkdir} disabled={!!r2Busy}>Create</Button>
         </div>
       )}
-      <div style={{ display: "flex", gap: 6, height: 200 }}>
+      <div style={{ display: "flex", gap: 6, flex: 1, minHeight: 0 }}>
         <Frame variant="well" style={{ width: 130, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
           {[ { label: "My Computer", icon: ICONS.myComputer, target: "C:\\" }, { label: "C: (Wenge)", icon: ICONS.hardDrive, target: "C:\\" }, { label: "Wenge", icon: ICONS.folderClosed, target: "C:\\Wenge" }, { label: "Desktop", icon: ICONS.folderClosed, target: DESKTOP_KEY }, { label: "Documents", icon: ICONS.folderClosed, target: DOCUMENTS_KEY }, { label: "Downloads", icon: ICONS.folderClosed, target: DOWNLOADS_KEY }, { label: "Windows", icon: ICONS.folderClosed, target: "C:\\Windows" }, { label: "R2 File Share", icon: ICONS.fileShare, target: "__r2" }, { label: "Recycle Bin", icon: ICONS.recycle, target: "__recycle" }, { label: "Network", icon: ICONS.network, target: "__network" } ].map((n) => {
             const active = inR2 ? n.target === "__r2" : (n.target !== "__recycle" && n.target !== "__network" && n.target !== "__r2" && normExplorerKey(n.target) === key);
