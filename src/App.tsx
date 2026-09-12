@@ -711,6 +711,23 @@ const [desktopDocs, setDesktopDocs] = useState<DesktopDoc[]>([]);
 const [docDropBusy, setDocDropBusy] = useState<string | null>(null);
 // ダブルクリックで開くVFSファイル (appId -> file)。keyにfile.idを使い再マウントさせる
 const [vfsFileByApp, setVfsFileByApp] = useState<Record<string, DesktopDoc>>({});
+const ieFile = useMemo<VfsFile | null>(() => {
+  const f = vfsFileByApp["ie"];
+  if (!f) return null;
+  return {
+    id: f.id,
+    path: `C:/Desktop/${f.name}`,
+    name: f.name,
+    dir: "C:/Desktop",
+    mime: f.mime,
+    size: f.size,
+    createdAt: f.createdAt,
+    updatedAt: f.updatedAt,
+    blob: f.blob,
+    sourceUrl: f.sourceUrl,
+    sourceR2Key: f.sourceR2Key,
+  };
+}, [vfsFileByApp]);
 
 // グリッドにスナップ
 const snapPos=(x:number,y:number,deskW:number,deskH:number)=>{
@@ -1663,23 +1680,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           comp = <ImageViewerApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />;
         }
         if (w.id === "ie") {
-          const f = vfsFileByApp["ie"];
-          const ieFile: VfsFile | null = f
-            ? {
-                id: f.id,
-                path: `C:/Desktop/${f.name}`,
-                name: f.name,
-                dir: "C:/Desktop",
-                mime: f.mime,
-                size: f.size,
-                createdAt: f.createdAt,
-                updatedAt: f.updatedAt,
-                blob: f.blob,
-                sourceUrl: f.sourceUrl,
-                sourceR2Key: f.sourceR2Key,
-              }
-            : null;
-          comp = <InternetExplorerApp key={f ? `vfs-${f.id}` : "blank"} file={ieFile} />;
+          comp = <InternetExplorerApp key={ieFile ? `vfs-${ieFile.id}` : "blank"} file={ieFile} />;
         }
         return (
           <WindowFrame
