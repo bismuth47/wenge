@@ -394,8 +394,14 @@ export function InternetExplorerApp() {
   /** iframe内のDLリンク（拡張子ベース）を横取りしてVFSに保存する */
   const attachVfsLinkInterceptor = useCallback(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !iframe.contentDocument) return;
-    const doc = iframe.contentDocument;
+    if (!iframe) return;
+    let doc: Document | null = null;
+    try {
+      doc = iframe.contentDocument;
+    } catch {
+      return;
+    }
+    if (!doc) return;
     const onClick = (e: MouseEvent) => {
       const anchor = (e.target as Element).closest("a[href]");
       if (!anchor) return;
