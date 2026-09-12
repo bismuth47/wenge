@@ -686,7 +686,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       )}
 
       <div style={{ flex: 1, minHeight: 260, background: "#fff", border: "2px inset #fff", padding: 2, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {currentUrl ? (
+        {(currentUrl || vfsHtml) ? (
           <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
             <iframe
               key={`${iframeSrc}::${reloadKey}::${useProxy ? "proxy" : "direct"}`}
