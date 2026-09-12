@@ -8,13 +8,13 @@ const StyledWindow = styled(Window)<{ $x: number; $y: number; $w: number; $h: nu
   left: ${(p) => (p.$maximized ? 0 : p.$x)}px;
   top: ${(p) => (p.$maximized ? 0 : p.$y)}px;
   width: ${(p) => (p.$maximized ? "100%" : p.$w + "px")};
-  height: ${(p) => (p.$maximized ? "calc(100% - 30px)" : p.$h + "px")};
+  height: ${(p) => (p.$maximized ? "100%" : p.$h + "px")};
   z-index: ${(p) => p.$z};
   display: flex;
   flex-direction: column;
   max-width: 100vw;
-  max-height: calc(100vh - 30px);
-  max-height: calc(100dvh - 30px);
+  max-height: 100vh;
+  max-height: 100dvh;
   @media (max-width: 600px) {
     /* 小さい画面では最大幅を画面幅に制限 */
     max-width: calc(100vw - 8px);
@@ -41,7 +41,7 @@ const Content = styled(WindowContent)`
   overflow: hidden;
   position: relative;
   display: flex;
-  min-height: 0;
+  height: 100%;
 `;
 
 const ResizeHandle = styled.div`

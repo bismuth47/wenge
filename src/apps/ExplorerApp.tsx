@@ -338,7 +338,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
   const r2Crumbs = inR2 ? normalizePrefix(r2Prefix!).replace(/\/$/, "").split("/").filter(Boolean) : [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 0 }}>
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
         <Button size="sm" onClick={goUp} disabled={inR2 ? !r2Prefix : key === "C:\\"} title="Up one level">Up</Button>
         <span style={{ fontSize: 11 }}>Location:</span>
@@ -369,7 +369,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           <Button size="sm" onClick={() => setMkdirOpen((v) => !v)} disabled={!!r2Busy}>New Folder...</Button>
           <Button size="sm" onClick={onDeleteSelected} disabled={!selected || !!r2Busy}>Delete</Button>
           <Button size="sm" onClick={onDownloadSelected} disabled={!selected?.startsWith("r2f:") || !!r2Busy}>Download...</Button>
-          <span style={{ fontSize: 11, color: "#555" }}>{r2Busy ?? (r2Loading ? "Loading..." : "Tip: drag a file onto the Desktop to copy it (saved in IndexedDB).")}</span>
+            <span style={{ fontSize: 11, color: "#555" }}>{r2Busy ?? (r2Loading ? "Loading..." : "")}</span>
         </div>
       )}
       {isVfsDir && !inDownloads && (
@@ -377,7 +377,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           <Button size="sm" onClick={() => refreshVfs()} disabled={vfsLoading}>Refresh</Button>
           <Button size="sm" onClick={() => { const f = vfsFiles.find((x) => `vfs:${x.id}` === selected); if (f) openVfsEntry(f.id); }} disabled={!selected?.startsWith("vfs:")}>Open</Button>
           <Button size="sm" onClick={() => { const id = (selected ?? "").slice(4); if (selected?.startsWith("vfs:") && id) deleteVfsEntry(id); }} disabled={!selected?.startsWith("vfs:")}>Delete</Button>
-          <span style={{ fontSize: 11, color: "#555" }}>{vfsLoading ? "Loading..." : "VFS (IndexedDB永続). Double-click to open in app."}</span>
+            <span style={{ fontSize: 11, color: "#555" }}>{vfsLoading ? "Loading..." : "VFS (永続). Double-click to open in app."}</span>
         </div>
       )}
       {inDownloads && (
@@ -398,7 +398,7 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
           <Button size="sm" onClick={onMkdir} disabled={!!r2Busy}>Create</Button>
         </div>
       )}
-      <div style={{ display: "flex", gap: 6, flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", gap: 6, flex: 1, minHeight: 0, overflow: "hidden" }}>
         <Frame variant="well" style={{ width: 130, padding: 6, background: "#fff", fontSize: 11, overflow: "auto" }}>
           {[ { label: "My Computer", icon: ICONS.myComputer, target: "C:\\" }, { label: "C: (Wenge)", icon: ICONS.hardDrive, target: "C:\\" }, { label: "Wenge", icon: ICONS.folderClosed, target: "C:\\Wenge" }, { label: "Desktop", icon: ICONS.folderClosed, target: DESKTOP_KEY }, { label: "Documents", icon: ICONS.folderClosed, target: DOCUMENTS_KEY }, { label: "Downloads", icon: ICONS.folderClosed, target: DOWNLOADS_KEY }, { label: "Windows", icon: ICONS.folderClosed, target: "C:\\Windows" }, { label: "R2 File Share", icon: ICONS.fileShare, target: "__r2" }, { label: "Recycle Bin", icon: ICONS.recycle, target: "__recycle" }, { label: "Network", icon: ICONS.network, target: "__network" } ].map((n) => {
             const active = inR2 ? n.target === "__r2" : (n.target !== "__recycle" && n.target !== "__network" && n.target !== "__r2" && normExplorerKey(n.target) === key);
@@ -407,72 +407,76 @@ export function ExplorerApp({ onOpenApp }: { onOpenApp?: (id: any) => void }) {
         </Frame>
         <Frame
           variant="well"
-          style={{ flex: 1, background: "#fff", padding: 0, overflow: "auto" }}
+          style={{ flex: 1, background: "#fff", padding: 0, overflow: "hidden", minHeight: 0, position: "relative" }}
           onDragOver={inR2 ? (e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } } : undefined}
           onDrop={inR2 ? (e) => { if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { e.preventDefault(); onUploadFiles(e.dataTransfer.files); } } : undefined}
           title={inR2 ? "You can also drop OS files here to upload" : undefined}
         >
-          {inR2 ? (
-            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
-              <tbody>
-                {!!r2Prefix && (<tr onClick={goUp} onDoubleClick={goUp} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>)}
-                {r2Folders.map((fd) => {
-                  const sel = selected === `r2d:${fd}`;
-                  return (<tr key={`d:${fd}`} draggable onDragStart={(e) => startDrag(e, { kind: "folder", prefix: `${r2Prefix}${fd}/`, name: fd })} onClick={() => setSelected(sel ? null : `r2d:${fd}`)} onDoubleClick={() => enterR2(`${r2Prefix}${fd}/`)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy this folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {fd}</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Folder</td></tr>);
-                })}
-                {r2Files.map((f) => {
-                  const name = r2NameOfKey(f.key);
-                  const sel = selected === `r2f:${f.key}`;
-                  const dl = () => handleDownload({ name, mime: guessMime(name), url: f.url, sourceR2Key: f.key });
-                  return (<tr key={f.key} draggable onDragStart={(e) => startDrag(e, { kind: "file", key: f.key, name, url: f.url, size: f.size, mime: guessMime(name) })} onClick={() => setSelected(sel ? null : `r2f:${f.key}`)} onDoubleClick={dl} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to download"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>R2 File</td></tr>);
-                })}
-              </tbody>
-            </table>
-          ) : isVfsDir ? (
-            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
-              <tbody>
-                <tr onClick={() => goTo("C:\\Wenge")} onDoubleClick={() => goTo("C:\\Wenge")} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>
-                {vfsFiles.map((f) => {
-                  const sel = selected === `vfs:${f.id}`;
-                  return (<tr key={f.id} onClick={() => setSelected(sel ? null : `vfs:${f.id}`)} onDoubleClick={() => openVfsEntry(f.id)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "pointer" }} title="Double-click to open in app"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>{vfsOpenTarget(f)}</td></tr>);
-                })}
-              </tbody>
-            </table>
-          ) : inDownloads ? (
-            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
-              <tbody>
-                <tr onClick={() => goTo("C:\\Wenge")} onDoubleClick={() => goTo("C:\\Wenge")} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>
-                {dlDocs.map((d) => {
-                  const name = d.name.split("/").pop() || d.name;
-                  const sel = selected === `dl:${d.id}`;
-                  return (<tr key={d.id} draggable onDragStart={(e) => startDownloadDrag(e, d)} onClick={() => setSelected(sel ? null : `dl:${d.id}`)} onDoubleClick={() => openDownload(d)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to open"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(d.size)}</td><td style={{ textAlign: "center" }}>Download</td></tr>);
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-              <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
-              <tbody>
-                {key !== "C:\\" && (<tr onClick={goUp} onDoubleClick={goUp} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>)}
-                {folders.map((fd) => (<tr key={fd} onClick={() => setSelected(fd)} onDoubleClick={() => goTo(key === "C:\\" ? ("C:\\" + fd) : (key + "\\" + fd))} style={{ borderTop: "1px solid #c0c0c0", background: selected === fd ? "#000080" : "transparent", color: selected === fd ? "#fff" : "#000", cursor: "pointer" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {fd}</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Folder</td></tr>))}
-                {files.map((f) => (<tr key={f.name} onClick={() => setSelected(f.name)} onDoubleClick={() => openEntry(f)} style={{ borderTop: "1px solid #c0c0c0", background: selected === f.name ? "#000080" : "transparent", color: selected === f.name ? "#fff" : "#000", cursor: "pointer" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{f.size}</td><td style={{ textAlign: "center" }}>{f.type}</td></tr>))}
-              </tbody>
-            </table>
-          )}
-          {!inR2 && !dir && <div style={{ padding: 16, fontSize: 11 }}>Folder not found. <a href="#" onClick={(e) => { e.preventDefault(); goTo("C:\\"); }}>Back to C:\</a></div>}
-          {inR2 && !r2Loading && r2Folders.length === 0 && r2Files.length === 0 && (
-            <div style={{ padding: 16, fontSize: 11, color: "#555" }}>{r2Note ?? "Empty folder. Upload files or create a folder — or drop OS files here."}</div>
-          )}
-          {inDownloads && !dlLoading && dlDocs.length === 0 && (
-            <div style={{ padding: 16, fontSize: 11, color: "#555" }}>Empty. Files you save via “Wenge内” will appear here.</div>
-          )}
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 24, overflow: "auto" }}>
+            {inR2 ? (
+              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+                <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
+                <tbody>
+                  {!!r2Prefix && (<tr onClick={goUp} onDoubleClick={goUp} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>)}
+                  {r2Folders.map((fd) => {
+                    const sel = selected === `r2d:${fd}`;
+                    return (<tr key={`d:${fd}`} draggable onDragStart={(e) => startDrag(e, { kind: "folder", prefix: `${r2Prefix}${fd}/`, name: fd })} onClick={() => setSelected(sel ? null : `r2d:${fd}`)} onDoubleClick={() => enterR2(`${r2Prefix}${fd}/`)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy this folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {fd}</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Folder</td></tr>);
+                  })}
+                  {r2Files.map((f) => {
+                    const name = r2NameOfKey(f.key);
+                    const sel = selected === `r2f:${f.key}`;
+                    const dl = () => handleDownload({ name, mime: guessMime(name), url: f.url, sourceR2Key: f.key });
+                    return (<tr key={f.key} draggable onDragStart={(e) => startDrag(e, { kind: "file", key: f.key, name, url: f.url, size: f.size, mime: guessMime(name) })} onClick={() => setSelected(sel ? null : `r2f:${f.key}`)} onDoubleClick={dl} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to download"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>R2 File</td></tr>);
+                  })}
+                </tbody>
+              </table>
+            ) : isVfsDir ? (
+              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+                <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
+                <tbody>
+                  <tr onClick={() => goTo("C:\\Wenge")} onDoubleClick={() => goTo("C:\\Wenge")} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>
+                  {vfsFiles.map((f) => {
+                    const sel = selected === `vfs:${f.id}`;
+                    return (<tr key={f.id} onClick={() => setSelected(sel ? null : `vfs:${f.id}`)} onDoubleClick={() => openVfsEntry(f.id)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "pointer" }} title="Double-click to open in app"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>{vfsOpenTarget(f)}</td></tr>);
+                  })}
+                </tbody>
+              </table>
+            ) : inDownloads ? (
+              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+                <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
+                <tbody>
+                  <tr onClick={() => goTo("C:\\Wenge")} onDoubleClick={() => goTo("C:\\Wenge")} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>
+                  {dlDocs.map((d) => {
+                    const name = d.name.split("/").pop() || d.name;
+                    const sel = selected === `dl:${d.id}`;
+                    return (<tr key={d.id} draggable onDragStart={(e) => startDownloadDrag(e, d)} onClick={() => setSelected(sel ? null : `dl:${d.id}`)} onDoubleClick={() => openDownload(d)} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "grab" }} title="Drag to the Desktop to copy · double-click to open"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {name}</td><td style={{ textAlign: "center" }}>{formatSize(d.size)}</td><td style={{ textAlign: "center" }}>Download</td></tr>);
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+                <thead><tr style={{ background: "#c0c0c0" }}><th style={{ textAlign: "left", padding: 3 }}>Name</th><th>Size</th><th>Type</th></tr></thead>
+                <tbody>
+                  {key !== "C:\\" && (<tr onClick={goUp} onDoubleClick={goUp} style={{ cursor: "pointer" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>)}
+                  {folders.map((fd) => (<tr key={fd} onClick={() => setSelected(fd)} onDoubleClick={() => goTo(key === "C:\\" ? ("C:\\" + fd) : (key + "\\" + fd))} style={{ borderTop: "1px solid #c0c0c0", background: selected === fd ? "#000080" : "transparent", color: selected === fd ? "#fff" : "#000", cursor: "pointer" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {fd}</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Folder</td></tr>))}
+                  {files.map((f) => (<tr key={f.name} onClick={() => setSelected(f.name)} onDoubleClick={() => openEntry(f)} style={{ borderTop: "1px solid #c0c0c0", background: selected === f.name ? "#000080" : "transparent", color: selected === f.name ? "#fff" : "#000", cursor: "pointer" }}><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{f.size}</td><td style={{ textAlign: "center" }}>{f.type}</td></tr>))}
+                </tbody>
+              </table>
+            )}
+            {!inR2 && !dir && <div style={{ padding: 16, fontSize: 11 }}>Folder not found. <a href="#" onClick={(e) => { e.preventDefault(); goTo("C:\\"); }}>Back to C:\</a></div>}
+            {inR2 && !r2Loading && r2Folders.length === 0 && r2Files.length === 0 && (
+              <div style={{ padding: 16, fontSize: 11, color: "#555" }}>{r2Note ?? "Empty folder. Upload files or create a folder — or drop OS files here."}</div>
+            )}
+            {inDownloads && !dlLoading && dlDocs.length === 0 && (
+              <div style={{ padding: 16, fontSize: 11, color: "#555" }}>Empty. Files you save via "Wenge内" will appear here.</div>
+            )}
+          </div>
+          <div style={{ position: "absolute", bottom: 24, left: 0, right: 0, height: 24, display: "flex", alignItems: "center", padding: "0 8px", background: "#c0c0c0", borderTop: "1px solid #808080", fontSize: 11 }}>{inR2 ? `${r2Folders.length + r2Files.length} object(s) · ${formatR2Path(r2Prefix!)}${r2Note ? ` · ${r2Note}` : ""}` : inDownloads ? `${dlDocs.length} object(s) · ${DOWNLOADS_KEY}` : (dir ? (folders.length + files.length) + " object(s)" : "0 object(s)") + ` · ${key}`}</div>
         </Frame>
       </div>
-      <div style={{ fontSize: 11 }}>{inR2 ? `${r2Folders.length + r2Files.length} object(s) · ${formatR2Path(r2Prefix!)}${r2Note ? ` · ${r2Note}` : ""}` : inDownloads ? `${dlDocs.length} object(s) · ${DOWNLOADS_KEY}` : (dir ? (folders.length + files.length) + " object(s)" : "0 object(s)") + ` · ${key}`}</div>
-      <ProgressBar value={inR2 ? (r2Loading ? 50 : 100) : inDownloads ? (dlLoading ? 50 : 100) : (dir ? 100 : 0)} style={{ height: 10 }} />
+      <div style={{ height: 24, display: "flex", alignItems: "center", justifyContent: "center", background: "#f0f0f0", borderTop: "1px solid #808080", fontSize: 11, flexShrink: 0 }}>
+        <ProgressBar value={inR2 ? (r2Loading ? 50 : 100) : inDownloads ? (dlLoading ? 50 : 100) : (dir ? 100 : 0)} style={{ height: 32, width: "100%" }} />
+      </div>
     </div>
   );
 }

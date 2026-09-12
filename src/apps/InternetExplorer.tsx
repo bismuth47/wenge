@@ -676,18 +676,17 @@ export function InternetExplorerApp() {
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "#008080", padding: 16, textAlign: "center" }}>
-            <div style={{ fontSize: 28, filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.6))" }}>🌐</div>
             <div style={{ fontSize: 13, fontWeight: "bold", color: "#fff", textShadow: "1px 1px 0 #000" }}>Internet Explorer</div>
             <div style={{ fontSize: 11, color: "#fff", textShadow: "1px 1px 0 #000", lineHeight: 1.5 }}>
-              アドレスバーに <b>URL</b> または <b>検索ワード</b> を入力して <b>Go</b> または <b>Enter</b> で開きます。<br />
-              検索ワードは Bing で窓内に表示されます。
+              Enter URL or search word and click <b>Go</b> or press <b>Enter</b> to open.<br />
+              Search words are displayed in Bing window.
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-              <Button size="sm" onClick={() => navigateTo("https://www.bing.com/")}>Bing ホーム</Button>
+              <Button size="sm" onClick={() => navigateTo("https://www.bing.com/")}>Bing Home</Button>
               <Button size="sm" onClick={() => navigateTo("https://ja.wikipedia.org/")}>Wikipedia</Button>
               <Button size="sm" onClick={() => navigateTo("https://example.com")}>example.com</Button>
             </div>
-            <div style={{ fontSize: 10, color: "#c0c0c0", textShadow: "1px 1px 0 #000" }}>ヒント: 例「wenge 使い方」「example.com」</div>
+            <div style={{ fontSize: 10, color: "#c0c0c0", textShadow: "1px 1px 0 #000" }}>Tip: Enter example.com</div>
           </div>
         )}
       </div>
@@ -697,9 +696,7 @@ export function InternetExplorerApp() {
         <span style={{ flexShrink: 0, color: "#808080" }}>{currentUrl ? (useProxy ? "Proxy" : "Direct") : "0 pages"} | {historyStack.length} pages</span>
       </div>
 
-      <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}>
-        ヒント: URL（例: <code>example.com</code>）は直接開き、検索ワード（例: <code>wenge 使い方</code>）は Bingでプロキシ経由検索（窓内）。DDGがブロック中のためBingをデフォルトにしています。DDGは「再試行」で試せます。
-      </div>
+      <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}></div>
     </div>
   );
 }
