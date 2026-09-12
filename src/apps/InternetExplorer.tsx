@@ -352,6 +352,42 @@ export function InternetExplorerApp() {
     }
   };
 
+  const injectCursorStyles = () => {
+    if (!useProxy) return;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    let doc: Document | null = null;
+    try {
+      doc = iframe.contentDocument;
+    } catch {
+      return;
+    }
+    if (!doc) return;
+    if (doc.getElementById("w95-iframe-cursors")) return;
+    const origin = window.location.origin;
+    const style = doc.createElement("style");
+    style.id = "w95-iframe-cursors";
+    style.textContent = `
+      * { cursor: url('${origin}/cursors/arrow.png') 0 0, default !important; }
+      a, a[href], button, [role="button"], [onclick], [onmouseover], [onmouseout],
+      [onmousedown], [onmouseup], [tabindex]:not([tabindex="-1"]) {
+        cursor: url('${origin}/cursors/hand.png') 0 0, pointer !important;
+      }
+      input[type="text"], input[type="password"], input[type="search"],
+      input[type="email"], input[type="url"], input[type="tel"], textarea {
+        cursor: url('${origin}/cursors/beam.png') 10 12, text !important;
+      }
+    `;
+    try {
+      const head = doc.querySelector("head");
+      if (head) {
+        head.appendChild(style);
+      } else {
+        doc.documentElement.appendChild(style);
+      }
+    } catch {}
+  };
+
   const handleIframeLoad = () => {
     setLoading(false);
     // Detect JSON bot-block rendered inside iframe (fallback for race)
@@ -378,6 +414,7 @@ export function InternetExplorerApp() {
 
     // Attach link interceptor for VFS downloads (media files, archives, etc.)
     attachVfsLinkInterceptor();
+    injectCursorStyles();
   };
 
   const handleIframeError = () => {
@@ -473,6 +510,38 @@ export function InternetExplorerApp() {
     }, 2500);
     return () => clearTimeout(t);
   }, [currentUrl, useProxy, loading, reloadKey]);
+
+  // Fix cursor reset when IE is active - prevent global cursor from overriding
+  useEffect(() => {
+    if (!currentUrl) return;
+    
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    
+    const mouseLeaveHandler = (e: MouseEvent) => {
+      // If mouse is leaving the iframe and there's no custom cursor on the iframe,
+      // the global cursor hook might try to reset it, which could cause issues
+      if (e.relatedTarget && !(e.relatedTarget as Element).closest('iframe')) {
+        // Check if IE's injected cursor styles are still in the iframe
+        try {
+          const doc = iframe.contentDocument;
+          if (doc) {
+            const style = doc.getElementById('w95-iframe-cursors');
+            if (!style) {
+              // Re-inject the cursor styles if they were removed
+              injectCursorStyles();
+            }
+          }
+        } catch {}
+      }
+    };
+    
+    iframe.addEventListener('mouseleave', mouseLeaveHandler);
+    
+    return () => {
+      iframe.removeEventListener('mouseleave', mouseLeaveHandler);
+    };
+  }, [currentUrl, injectCursorStyles, iframeRef]);
 
   useEffect(() => {
     if (!currentUrl) return;
