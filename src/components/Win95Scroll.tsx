@@ -166,81 +166,143 @@ export type Win95ScrollProps = {
   /** false (既定) = Win95らしく常時表示。true = スクロール不要時はバーを隠す */
   autoHide?: boolean;
   step?: number;
+  /**
+   * ビューポートに直接付与する max-height (例: "calc(100dvh - 88px)")。
+   * サブメニューのように祖先の高さが不定 (height:auto + max-heightのみ) の場合、
+   * flex-shrink連鎖ではViewportの高さが確定しないため、スクロールコンテナ自身を
+   * max-heightで縛るのが最も確実。未指定時は従来通り親の高さに追従する。
+   */
+  maxHeight?: string | number;
 };
 
-export function Win95Scroll({ children, className, style, autoHide = false, step = 40 }: Win95ScrollProps) {
+export function Win95Scroll({ children, className, style, autoHide = false, step = 40, maxHeight }: Win95ScrollProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const trackVRef = useRef<HTMLDivElement>(null);
   const trackHRef = useRef<HTMLDivElement>(null);
   const [v, setV] = useState({ thumbH: 0, thumbTop: 0, visible: false });
   const [h, setH] = useState({ thumbW: 0, thumbLeft: 0, visible: false });
+  // 最新のつまみ寸法をドラッグ計算用に保持 (stale closure対策)
+  const geoRef = useRef({ vThumbH: 0, hThumbW: 0 });
+  geoRef.current.vThumbH = v.thumbH;
+  geoRef.current.hThumbW = h.thumbW;
 
   const update = useCallback(() => {
     const el = viewportRef.current;
     if (!el) return;
     const { scrollTop, scrollHeight, clientHeight, scrollLeft, scrollWidth, clientWidth } = el;
+    // 非表示時(display:none)のトラック実測は 0 になるため、0 の場合は仮定値で
+    // ブートストラップする (そうしないと visible:false → 実測0 → 永遠に非表示のデッドロックになる)
+    const measuredH = trackVRef.current?.clientHeight ?? 0;
+    const measuredW = trackHRef.current?.clientWidth ?? 0;
+    const trackH = measuredH > 0 ? measuredH : Math.max(0, clientHeight - BAR * 2);
+    const trackW = measuredW > 0 ? measuredW : Math.max(0, clientWidth - BAR * 2);
     const vVisible = scrollHeight > clientHeight + 1;
     const hVisible = scrollWidth > clientWidth + 1;
-    if (vVisible) {
-      const trackH = Math.max(0, clientHeight - BAR * 2);
-      const thumbH = Math.max(BAR, (clientHeight / scrollHeight) * trackH);
-      const maxTop = Math.max(1, trackH - thumbH);
-      const ratio = scrollHeight - clientHeight <= 0 ? 0 : scrollTop / (scrollHeight - clientHeight);
-      setV({ thumbH, thumbTop: ratio * maxTop, visible: true });
+    if (vVisible && trackH > 0) {
+      const thumbH = Math.min(trackH, Math.max(16, (clientHeight / scrollHeight) * trackH));
+      const maxTop = Math.max(0, trackH - thumbH);
+      const ratio = scrollHeight - clientHeight <= 0 ? 0 : Math.min(1, Math.max(0, scrollTop / (scrollHeight - clientHeight)));
+      const thumbTop = ratio * maxTop;
+      setV((p) => (p.visible && p.thumbH === thumbH && Math.abs(p.thumbTop - thumbTop) < 0.5 ? p : { thumbH, thumbTop, visible: true }));
     } else {
       setV((p) => (p.visible ? { thumbH: 0, thumbTop: 0, visible: false } : p));
     }
-    if (hVisible) {
-      const trackW = Math.max(0, clientWidth - BAR * 2);
-      const thumbW = Math.max(BAR, (clientWidth / scrollWidth) * trackW);
-      const maxLeft = Math.max(1, trackW - thumbW);
-      const ratio = scrollWidth - clientWidth <= 0 ? 0 : scrollLeft / (scrollWidth - clientWidth);
-      setH({ thumbW, thumbLeft: ratio * maxLeft, visible: true });
+    if (hVisible && trackW > 0) {
+      const thumbW = Math.min(trackW, Math.max(16, (clientWidth / scrollWidth) * trackW));
+      const maxLeft = Math.max(0, trackW - thumbW);
+      const ratio = scrollWidth - clientWidth <= 0 ? 0 : Math.min(1, Math.max(0, scrollLeft / (scrollWidth - clientWidth)));
+      const thumbLeft = ratio * maxLeft;
+      setH((p) => (p.visible && p.thumbW === thumbW && Math.abs(p.thumbLeft - thumbLeft) < 0.5 ? p : { thumbW, thumbLeft, visible: true }));
     } else {
       setH((p) => (p.visible ? { thumbW: 0, thumbLeft: 0, visible: false } : p));
     }
   }, []);
 
+  // rAFスロットル (scroll連打・MO連鎖による更新ループを防止)
+  const rafRef = useRef<number | null>(null);
+  const scheduleUpdate = useCallback(() => {
+    if (rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      update();
+    });
+  }, [update]);
+
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    const ro = new ResizeObserver(update);
+    // 初回はレイアウト確定後に2フレーム待って計測 (absolute配置+maxHeight直後対策)
+    const raf1 = requestAnimationFrame(() => {
+      update();
+      const raf2 = requestAnimationFrame(() => update());
+      (el as any).__w95raf2 = raf2;
+    });
+    el.addEventListener("scroll", scheduleUpdate, { passive: true });
+    // viewport自体のリサイズ + コンテンツ寸法の変化(画像・フォント確定等)を両方監視。
+    // MO attributes:true はつまみstyle更新との無限ループになるため使わない。
+    // ラッパーdivを挟むと height:100% 系レイアウトを壊すため第一子を直接監視する。
+    const ro = new ResizeObserver(scheduleUpdate);
     ro.observe(el);
-    const mo = new MutationObserver(update);
-    mo.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
-    window.addEventListener("resize", update);
+    let observedChild: Element | null = null;
+    const observeChild = () => {
+      const first = el.firstElementChild;
+      if (first !== observedChild) {
+        if (observedChild) ro.unobserve(observedChild);
+        observedChild = first;
+        if (first) ro.observe(first);
+      }
+    };
+    observeChild();
+    const mo = new MutationObserver(() => {
+      observeChild();
+      scheduleUpdate();
+    });
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    window.addEventListener("resize", scheduleUpdate);
     return () => {
-      el.removeEventListener("scroll", update);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame((el as any).__w95raf2);
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      el.removeEventListener("scroll", scheduleUpdate);
       ro.disconnect();
       mo.disconnect();
-      window.removeEventListener("resize", update);
+      window.removeEventListener("resize", scheduleUpdate);
     };
-  }, [update]);
+  }, [update, scheduleUpdate]);
 
   const scrollByLine = useCallback((dx: number, dy: number) => {
     viewportRef.current?.scrollBy({ left: dx, top: dy, behavior: "auto" });
   }, []);
 
-  // 長押しリピート用
+  // 長押しリピート用 (timeoutリーク修正: 離したらpendingも破棄)
   const holdTimer = useRef<number | null>(null);
+  const holdDelay = useRef<number | null>(null);
   const startHold = useCallback(
     (fn: () => void) => {
+      stopHoldInner();
       fn();
-      window.setTimeout(() => {
+      holdDelay.current = window.setTimeout(() => {
+        holdDelay.current = null;
         holdTimer.current = window.setInterval(fn, 50);
       }, 350);
     },
     []
   );
-  const stopHold = useCallback(() => {
+  function stopHoldInner() {
+    if (holdDelay.current != null) {
+      window.clearTimeout(holdDelay.current);
+      holdDelay.current = null;
+    }
     if (holdTimer.current != null) {
       window.clearInterval(holdTimer.current);
       holdTimer.current = null;
     }
+  }
+  const stopHold = useCallback(() => {
+    stopHoldInner();
   }, []);
-  useEffect(() => () => stopHold(), [stopHold]);
+  useEffect(() => () => stopHoldInner(), []);
 
   const onTrackVClick = useCallback(
     (e: React.MouseEvent) => {
@@ -278,11 +340,12 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
     if (!el || !track) return;
     const startY = e.clientY;
     const startTop = el.scrollTop;
-    const trackH = Math.max(1, track.clientHeight - v.thumbH);
-    const range = Math.max(1, el.scrollHeight - el.clientHeight);
     const onMove = (ev: MouseEvent) => {
+      // 計測はイベント時点の実寸で (staleなstateを使わない)
+      const tH = Math.max(1, track.clientHeight - (geoRef.current.vThumbH || 16));
+      const range = Math.max(1, el.scrollHeight - el.clientHeight);
       const dy = ev.clientY - startY;
-      el.scrollTop = startTop + (dy / trackH) * range;
+      el.scrollTop = startTop + (dy / tH) * range;
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -290,7 +353,7 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [v.thumbH]);
+  }, []);
 
   const onThumbHDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -300,11 +363,11 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
     if (!el || !track) return;
     const startX = e.clientX;
     const startLeft = el.scrollLeft;
-    const trackW = Math.max(1, track.clientWidth - h.thumbW);
-    const range = Math.max(1, el.scrollWidth - el.clientWidth);
     const onMove = (ev: MouseEvent) => {
+      const tW = Math.max(1, track.clientWidth - (geoRef.current.hThumbW || 16));
+      const range = Math.max(1, el.scrollWidth - el.clientWidth);
       const dx = ev.clientX - startX;
-      el.scrollLeft = startLeft + (dx / trackW) * range;
+      el.scrollLeft = startLeft + (dx / tW) * range;
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
@@ -312,7 +375,7 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [h.thumbW]);
+  }, []);
 
   const showV = v.visible && (!autoHide || v.visible);
   const showH = h.visible && (!autoHide || h.visible);
@@ -324,7 +387,12 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
   return (
     <Wrap className={className} style={style}>
       <BodyRow>
-        <Viewport ref={viewportRef} className="win95-viewport" tabIndex={0}>
+        <Viewport
+          ref={viewportRef}
+          className="win95-viewport"
+          tabIndex={0}
+          style={maxHeight != null ? { maxHeight } : undefined}
+        >
           {children}
         </Viewport>
         <VBar className="win95-scrollbar win95-scrollbar-vertical" $visible={renderV} aria-hidden={!renderV}>
