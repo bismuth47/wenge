@@ -44,26 +44,34 @@ export function FileShareApp() {
     setUploading(true);
     setProgress(10);
     try {
-      // Upload all selected files (and create intermediate folders as needed)
+      // Pre‑compute all unique intermediate folders across the batch (deduped)
+      const folderSet = new Set<string>();
+      for (const file of filesToUpload) {
+        const filePath = file.webkitRelativePath || file.name;
+        const parts = filePath.split('/');
+        let cur = prefix;
+        for (let i = 0; i < parts.length - 1; i++) {
+          cur += parts[i] + '/';
+          folderSet.add(cur);
+        }
+      }
+      // Create folders in parallel (ignore errors – they may already exist)
+      await Promise.allSettled([...folderSet].map(folderPath => {
+        const folderName = folderPath.slice(prefix.length).replace(/^\//, '');
+        return createR2Folder(prefix, folderName);
+      }));
+      
+      // Upload all files, preserving full paths
       for (let i = 0; i < filesToUpload.length; i++) {
         const file = filesToUpload[i];
-        // Extract path from file name and create intermediate folders if needed
         const filePath = file.webkitRelativePath || file.name;
-        const pathParts = filePath.split('/');
-        
-        // Build the full key with prefix
+        const parts = filePath.split('/');
         let fullKey = prefix;
-        for (let j = 0; j < pathParts.length; j++) {
-          if (j === pathParts.length - 1) {
-            // Last part is the file name
-            fullKey += pathParts[j];
-            // Presigned PUT flow via shared lib (server signs, browser PUTs to R2)
-            await uploadToR2(fullKey, file);
-          } else {
-            // Intermediate directory - create it first
-            await createR2Folder(prefix, pathParts[j]);
-          }
+        for (let j = 0; j < parts.length; j++) {
+          fullKey += parts[j];
+          if (j !== parts.length - 1) fullKey += '/';
         }
+        await uploadToR2(fullKey, file);
         setProgress(Math.min(90, 10 + Math.round((i + 1) / filesToUpload.length * 80)));
       }
       await fetchFiles();
