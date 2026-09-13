@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
-import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, type R2File } from "../lib/r2";
+import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, createR2Folder, type R2File } from "../lib/r2";
 import { handleDownload } from "../lib/downloadTarget";
 
 type FileItem = R2File;
@@ -38,19 +38,42 @@ export function FileShareApp() {
   }, []);
 
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const filesToUpload = Array.from(e.target.files || []);
+    if (filesToUpload.length === 0) return;
+    
     setUploading(true);
     setProgress(10);
     try {
-      // Presigned PUT flow via shared lib (server signs, browser PUTs to R2)
-      await uploadToR2(prefix, file);
-      setProgress(90);
+      // Upload all selected files (and create intermediate folders as needed)
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const file = filesToUpload[i];
+        // Extract path from file name and create intermediate folders if needed
+        const filePath = file.webkitRelativePath || file.name;
+        const pathParts = filePath.split('/');
+        
+        // Build the full key with prefix
+        let fullKey = prefix;
+        for (let j = 0; j < pathParts.length; j++) {
+          if (j === pathParts.length - 1) {
+            // Last part is the file name
+            fullKey += pathParts[j];
+          } else {
+            // Intermediate directory - create it first
+            // For now, we'll just build the path without creating intermediate folders
+            // as R2 has no real folders - the prefix handles the path
+            fullKey += pathParts[j] + '/';
+          }
+        }
+        
+        // Presigned PUT flow via shared lib (server signs, browser PUTs to R2)
+        await uploadToR2(fullKey, file);
+        setProgress(Math.min(90, 10 + Math.round((i + 1) / filesToUpload.length * 80)));
+      }
       await fetchFiles();
       setProgress(100);
     } catch {
-      // localStorage mock for demo
-      const mock: FileItem = { key: file.name, url: URL.createObjectURL(file), size: file.size, uploadedAt: new Date().toISOString() };
+      // localStorage mock for demo (only first file for simplicity)
+      const mock: FileItem = { key: filesToUpload[0].name, url: URL.createObjectURL(filesToUpload[0]), size: filesToUpload[0].size, uploadedAt: new Date().toISOString() };
       const next = [mock, ...files];
       setFiles(next);
       localStorage.setItem("wenge_files", JSON.stringify(next));
@@ -74,7 +97,7 @@ export function FileShareApp() {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Button as="span">Choose File</Button>
-            <input type="file" onChange={onUpload} style={{ display: "none" }} />
+            <input type="file" onChange={onUpload} style={{ display: "none" }} multiple />
           </label>
           <TextInput placeholder="Filter by prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} width={160} />
           <Button onClick={fetchFiles}>Refresh</Button>
