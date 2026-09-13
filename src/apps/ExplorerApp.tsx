@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Frame, MenuList, MenuListItem, ProgressBar, Separator, TextInput } from "react95";
 import { showConfirm, showError, showInfo } from "../components/SystemDialog";
 import { ICONS } from "../assets/icons";
@@ -25,12 +25,6 @@ import {
   registerWengeDrop,
   DRAG_THRESHOLD_PX,
 } from "../lib/pointerDrag";
-
-interface FileInputWithDirectory extends HTMLInputElement {
-  webkitdirectory?: boolean;
-  directory?: boolean;
-  mozdirectory?: boolean;
-}
 import {
   DOWNLOADS_CHANGED_EVENT,
   deleteDownload,
@@ -923,7 +917,7 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
           <Button size="sm" onClick={() => refreshR2(r2Prefix!)} disabled={r2Loading}>Refresh</Button>
           <Button size="sm" onClick={() => fileRef.current?.click()} disabled={!!r2Busy}>Upload...</Button>
-          <input ref={fileRef} type="file" multiple webkitdirectory directory mozdirectory style={{ display: "none" }} onChange={(e) => onUploadFiles(e.target.files)} />
+           <input ref={fileRef} type="file" multiple {...{ webkitdirectory: true, directory: true, mozdirectory: true }} style={{ display: "none" }} onChange={(e) => onUploadFiles(e.target.files)} />
           <Button size="sm" onClick={() => setMkdirOpen((v) => !v)} disabled={!!r2Busy}>New Folder...</Button>
           <Button size="sm" onClick={onDeleteSelected} disabled={!selected || !!r2Busy}>Delete</Button>
           <Button size="sm" onClick={() => { if (selected?.startsWith("r2f:")) openR2Entry(selected.slice(4)); }} disabled={!selected?.startsWith("r2f:") || !!r2Busy}>Open</Button>
