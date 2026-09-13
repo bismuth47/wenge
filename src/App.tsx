@@ -459,7 +459,7 @@ const PROGRAMS_GROUPS: ProgramsGroup[] = [
   { label: "Games", ids: ["minesweeper", "solitaire", "freecell", "hearts"] },
   { label: "System Tools", ids: ["scandisk", "backup", "sysmon"] },
 ];
-const PROGRAMS_TOP: AppId[] = ["explorer", "file-share", "chat", "briefcase", "dialer", "network"];
+const PROGRAMS_TOP: AppId[] = ["my-computer", "explorer", "file-share", "chat", "briefcase", "dialer", "network"];
 
 // --- Documentsメニュー構成 (実機Win95準拠: Explorerを直接開かずカスケード表示) ---
 // ExplorerApp の "C:\\Wenge\\Documents" と同期させる。appId があるものは
@@ -1752,8 +1752,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                 <div style={{ flex: 1, position:"relative" }}>
                   {/* Programs with cascading submenu */}
                   <div onMouseEnter={()=>{ cancelMenuClose(); setProgramsOpen(true); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
-                    <MenuListItem onClick={() => { openWindow("explorer", { silent: true }); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }} onMouseDown={(e) => handleStartMenuItemPointerDown(e, "my-computer", "Programs", ICONS.myComputer as any)}>
-                      <img src={ICONS.myComputer} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} />
+                    <MenuListItem onClick={() => { cancelMenuClose(); setProgramsOpen(true); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+                      <img src={ICONS.folderClosed} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} />
                       <span style={{ flex:1, textAlign:"left" }}>Programs</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                     </MenuListItem>
                     {programsOpen && (
