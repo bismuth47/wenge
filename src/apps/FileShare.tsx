@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
-import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, createR2Folder, type R2File } from "../lib/r2";
+import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, type R2File } from "../lib/r2";
 import { handleDownload } from "../lib/downloadTarget";
 
 type FileItem = R2File;
