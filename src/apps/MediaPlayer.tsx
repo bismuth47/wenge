@@ -369,7 +369,7 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
                   style={{
                     background: i === index ? "#000080" : "transparent",
                     color: i === index ? "#fff" : "#000",
-                    cursor: "pointer",
+                    cursor: "url('/cursors/hand.png') 12 0, pointer",
                   }}
                 >
                   <td style={{ padding: "2px 6px", borderRight: "1px solid #dfdfdf" }}>

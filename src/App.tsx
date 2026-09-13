@@ -1721,7 +1721,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           style={{
             position: "fixed", inset: 0, background: "#0000aa", color: "#fff", zIndex: 10000,
             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            fontFamily: "monospace", padding: 40, cursor: "pointer"
+            fontFamily: "monospace", padding: 40, cursor: "url('/cursors/hand.png') 12 0, pointer"
           }}
         >
           <div style={{ background: "#c0c0c0", color: "#0000aa", padding: "2px 8px", fontWeight: "bold" }}>Wenge</div>

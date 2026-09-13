@@ -63,7 +63,7 @@ export function DesktopIcons({ onOpen }: { onOpen?: (fileId: string, target: str
             key={f.id}
             onDoubleClick={() => onOpen?.(f.id, vfsOpenTarget(f))}
             title={`${f.path}\nDouble-click to open (${vfsOpenTarget(f)})`}
-            style={{ width: 76, textAlign: "center", cursor: "pointer", fontSize: 10 }}
+            style={{ width: 76, textAlign: "center", cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 10 }}
           >
             <img src={iconFor(f.mime, f.name)} alt="" width={28} height={28} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
             <div style={{ wordBreak: "break-word", lineHeight: 1.2 }}>{f.name}</div>

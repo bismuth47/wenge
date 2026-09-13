@@ -75,7 +75,7 @@ export function HeartsApp(){
       </Frame>
       <div style={{ display:"flex", flexWrap:"wrap", gap:4, justifyContent:"center", maxWidth:360 }}>
         {hands[0].map((c,i)=>(
-          <Frame key={c.id} variant="well" onClick={()=>play(i)} style={{ width:44, height:60, background:"#fff", display:"grid", placeItems:"center", cursor:"pointer", color: c.s==="♥"||c.s==="♦"?"red":"black", fontSize:12 }}>
+          <Frame key={c.id} variant="well" onClick={()=>play(i)} style={{ width:44, height:60, background:"#fff", display:"grid", placeItems:"center", cursor:"url('/cursors/hand.png') 12 0, pointer", color: c.s==="♥"||c.s==="♦"?"red":"black", fontSize:12 }}>
             {c.s}{RANKS[c.r]}
           </Frame>
         ))}

@@ -60,7 +60,7 @@ export function SolitaireApp(){
       </div>
       <div style={{ display:"flex", gap:8 }}>
         <div style={{ display:"flex", gap:6 }}>
-          <Frame variant="well" style={{ width:50, height:70, background:"#008080", display:"grid", placeItems:"center", cursor:"pointer" }} onClick={draw}>
+          <Frame variant="well" style={{ width:50, height:70, background:"#008080", display:"grid", placeItems:"center", cursor:"url('/cursors/hand.png') 12 0, pointer" }} onClick={draw}>
             <div style={{ fontSize:10, color:"#fff" }}>{stock.length} left</div>
           </Frame>
           <Frame variant="well" style={{ width:50, height:70, background:"#fff", display:"grid", placeItems:"center" }}>

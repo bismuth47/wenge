@@ -16,7 +16,7 @@ export function CharMapApp(){
       </div>
       <Frame variant="well" style={{ background:"#fff", padding:4, maxHeight:200, overflow:"auto", display:"grid", gridTemplateColumns:"repeat(16, 1fr)", gap:1 }}>
         {chars.map(c=>(
-          <div key={c} onClick={()=>setSelected(c)} style={{ width:22, height:22, display:"grid", placeItems:"center", border: selected===c?"1px solid #000080":"1px solid #c0c0c0", background: selected===c?"#000080":"#fff", color: selected===c?"#fff":"#000", cursor:"pointer", fontFamily:font, fontSize:14 }}>
+          <div key={c} onClick={()=>setSelected(c)} style={{ width:22, height:22, display:"grid", placeItems:"center", border: selected===c?"1px solid #000080":"1px solid #c0c0c0", background: selected===c?"#000080":"#fff", color: selected===c?"#fff":"#000", cursor:"url('/cursors/hand.png') 12 0, pointer", fontFamily:font, fontSize:14 }}>
             {c}
           </div>
         ))}

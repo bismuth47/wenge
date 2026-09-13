@@ -82,7 +82,7 @@ export function MinesweeperApp() {
                 fontWeight: "bold",
                 background: cell.revealed ? "#fff" : "#c0c0c0",
                 border: cell.revealed ? "1px solid #808080" : "2px outset #fff",
-                cursor: "pointer",
+                cursor: "url('/cursors/hand.png') 12 0, pointer",
               }}
             >
               {cell.flagged ? "🚩" : cell.revealed ? (cell.mine ? "💣" : cell.adj || "") : ""}

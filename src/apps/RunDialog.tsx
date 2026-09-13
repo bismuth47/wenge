@@ -63,7 +63,7 @@ export function RunDialog({ onClose, onRun }: { onClose?: () => void; onRun?: (i
       {browseOpen && (
         <Frame variant="well" style={{ background: "#fff", padding: 4, maxHeight: 150, overflow: "auto" }}>
           <div style={{ fontSize: 11, background: "#000080", color: "#fff", padding: "2px 6px" }}>Browse - C:\\Windows</div>
-          {RUN_PROGRAMS.map((p) => (<div key={p.cmd} onClick={() => setCmd(p.cmd)} onDoubleClick={() => { setCmd(p.cmd); setBrowseOpen(false); submit(p.cmd); }} style={{ fontSize: 11, padding: "3px 6px", cursor: "pointer", background: cmd === p.cmd ? "#000080" : "transparent", color: cmd === p.cmd ? "#fff" : "#000" }}>{p.label}</div>))}
+          {RUN_PROGRAMS.map((p) => (<div key={p.cmd} onClick={() => setCmd(p.cmd)} onDoubleClick={() => { setCmd(p.cmd); setBrowseOpen(false); submit(p.cmd); }} style={{ fontSize: 11, padding: "3px 6px", cursor: "url('/cursors/hand.png') 12 0, pointer", background: cmd === p.cmd ? "#000080" : "transparent", color: cmd === p.cmd ? "#fff" : "#000" }}>{p.label}</div>))}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, padding: 4 }}>
             <Button size="sm" onClick={() => setBrowseOpen(false)}>OK</Button>
             <Button size="sm" onClick={() => setBrowseOpen(false)}>Cancel</Button>

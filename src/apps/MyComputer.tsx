@@ -27,7 +27,7 @@ export function MyComputerApp() {
                 alt={d.label}
                 width={32}
                 height={32}
-                style={{ imageRendering: "pixelated" as const, cursor: "pointer" }}
+                style={{ imageRendering: "pixelated" as const, cursor: "url('/cursors/hand.png') 12 0, pointer" }}
                 onClick={() => showInfo(d.label, `${d.label}\nFile system: ${d.fs}\nCapacity: ${d.total}\nFree: ${d.free}%`)}
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).style.display = "none";

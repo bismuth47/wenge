@@ -31,7 +31,7 @@ export function NetworkApp(){
       <div style={{ display:"flex", gap:6 }}>
         <Frame variant="well" style={{ width:150, background:"#fff", padding:4 }}>
           {pcs.map(pc=>(
-            <div key={pc.name} onClick={()=>setSelected(pc.name)} style={{ padding:"4px 6px", display:"flex", alignItems:"center", gap:6, background: selected===pc.name?"#000080":"transparent", color: selected===pc.name?"#fff":"#000", cursor:"pointer", fontSize:11 }}>
+            <div key={pc.name} onClick={()=>setSelected(pc.name)} style={{ padding:"4px 6px", display:"flex", alignItems:"center", gap:6, background: selected===pc.name?"#000080":"transparent", color: selected===pc.name?"#fff":"#000", cursor:"url('/cursors/hand.png') 12 0, pointer", fontSize:11 }}>
               <img src={ICONS.myComputer} width={16} height={16} style={{imageRendering:"pixelated" as const}} alt="" />
               {pc.name} {pc.online?"●":"○"}
             </div>

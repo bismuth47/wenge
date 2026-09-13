@@ -37,7 +37,7 @@ export function BriefcaseApp(){
       <Frame variant="well" style={{ background:"#fff", padding:4 }}>
         <table style={{ width:"100%", fontSize:11, borderCollapse:"collapse" }}>
           <thead><tr style={{ background:"#000080", color:"#fff" }}><th style={{padding:3, textAlign:"left"}}>Name</th><th>Status</th><th>Location</th></tr></thead>
-          <tbody>{items.map((it,i)=> <tr key={i} onClick={()=>setSelected(i)} style={{ borderTop:"1px solid #c0c0c0", background: selected===i?"#000080":"transparent", color: selected===i?"#fff":"#000", cursor:"pointer" }}><td style={{padding:3}}>{it.name}</td><td style={{textAlign:"center", color: selected===i?"#fff":(it.status==="Needs update"?"#ff0000":it.status==="Orphan"?"#808080":"#008000")}}>{it.status}</td><td style={{padding:3}}>{it.path}</td></tr>)}</tbody>
+          <tbody>{items.map((it,i)=> <tr key={i} onClick={()=>setSelected(i)} style={{ borderTop:"1px solid #c0c0c0", background: selected===i?"#000080":"transparent", color: selected===i?"#fff":"#000", cursor:"url('/cursors/hand.png') 12 0, pointer" }}><td style={{padding:3}}>{it.name}</td><td style={{textAlign:"center", color: selected===i?"#fff":(it.status==="Needs update"?"#ff0000":it.status==="Orphan"?"#808080":"#008000")}}>{it.status}</td><td style={{padding:3}}>{it.path}</td></tr>)}</tbody>
         </table>
         {items.length===0 && <div style={{ padding:12, textAlign:"center", color:"#808080" }}>Briefcase is empty. Drag files here.</div>}
       </Frame>

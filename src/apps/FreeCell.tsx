@@ -52,7 +52,7 @@ export function FreeCellApp(){
       </div>
       <div style={{ display:"flex", gap:8 }}>
         {free.map((c,i)=>(
-          <Frame key={i} variant="well" style={{ width:50, height:70, background: sel && "free" in sel && sel.free===i ? "#000080":"#c0c0c0", color: sel && "free" in sel && sel.free===i ? "#fff":"#000", display:"grid", placeItems:"center", cursor:"pointer", border: c?"2px solid #000":"2px inset #fff" }} onClick={()=> setSel({free:i})}>
+          <Frame key={i} variant="well" style={{ width:50, height:70, background: sel && "free" in sel && sel.free===i ? "#000080":"#c0c0c0", color: sel && "free" in sel && sel.free===i ? "#fff":"#000", display:"grid", placeItems:"center", cursor:"url('/cursors/hand.png') 12 0, pointer", border: c?"2px solid #000":"2px inset #fff" }} onClick={()=> setSel({free:i})}>
             {c? <span style={{ color:isRed(c.s)?"red":"black" }}>{c.s}{RANKS[c.r-1]}</span> : <span style={{fontSize:10, color:"#808080"}}>Free</span>}
           </Frame>
         ))}
@@ -67,7 +67,7 @@ export function FreeCellApp(){
         {cols.map((col,ci)=>(
           <div key={ci} style={{ width:50, display:"flex", flexDirection:"column" }}>
             {col.map((c,idx)=>(
-              <Frame key={c.id} variant="well" onClick={()=>selectCol(ci,idx)} style={{ width:50, height:28, marginTop: idx===0?0:-16, background: sel && "col" in sel && sel.col===ci && sel.idx===idx ? "#000080":"#fff", color: sel && "col" in sel && sel.col===ci && sel.idx===idx ? "#fff" : isRed(c.s)?"red":"black", display:"grid", placeItems:"center", fontSize:11, cursor:"pointer", zIndex:idx }}>
+              <Frame key={c.id} variant="well" onClick={()=>selectCol(ci,idx)} style={{ width:50, height:28, marginTop: idx===0?0:-16, background: sel && "col" in sel && sel.col===ci && sel.idx===idx ? "#000080":"#fff", color: sel && "col" in sel && sel.col===ci && sel.idx===idx ? "#fff" : isRed(c.s)?"red":"black", display:"grid", placeItems:"center", fontSize:11, cursor:"url('/cursors/hand.png') 12 0, pointer", zIndex:idx }}>
                 {c.s}{RANKS[c.r-1]}
               </Frame>
             ))}

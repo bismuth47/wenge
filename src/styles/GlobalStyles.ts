@@ -35,7 +35,16 @@ const GlobalStyle = createGlobalStyle`
     cursor: inherit;
   }
   a, button, [role="button"] {
-    cursor: url('/cursors/arrow.png') 0 0, pointer;
+    cursor: url('/cursors/hand.png') 12 0, pointer;
+  }
+  /* react95内製コンポーネント (Button/Select/TreeView/Switch等) が
+     cursor: pointer を内部指定しているため、カスタムhandで上書き */
+  button, a, [role="button"], select, summary,
+  [class*="Button"], [class*="Select"], [class*="Tab"], [class*="Tree"] {
+    cursor: url('/cursors/hand.png') 12 0, pointer;
+  }
+  button *, a *, [role="button"] * {
+    cursor: inherit;
   }
   input[type="text"], input[type="password"], input[type="search"], textarea, [contenteditable="true"] {
     cursor: url('/cursors/beam.png') 10 12, text;

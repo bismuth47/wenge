@@ -382,7 +382,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       * { cursor: url('${origin}/cursors/arrow.png') 0 0, default !important; }
       a, a[href], button, [role="button"], [onclick], [onmouseover], [onmouseout],
       [onmousedown], [onmouseup], [tabindex]:not([tabindex="-1"]) {
-        cursor: url('${origin}/cursors/hand.png') 0 0, pointer !important;
+        cursor: url('${origin}/cursors/hand.png') 12 0, pointer !important;
       }
       input[type="text"], input[type="password"], input[type="search"],
       input[type="email"], input[type="url"], input[type="tel"], textarea {
@@ -695,9 +695,9 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
         <span style={{ fontWeight: "bold" }}>お気に入り:</span>
         {QUICK_LINKS.map((u) => (
-          <Anchor key={u} onClick={() => navigateTo(u)} style={{ cursor: "pointer", fontSize: 11 }}>{u.replace("https://", "")}</Anchor>
+          <Anchor key={u} onClick={() => navigateTo(u)} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 11 }}>{u.replace("https://", "")}</Anchor>
         ))}
-        <Anchor onClick={() => navigateTo("https://www.wenge.co.jp/")} style={{ cursor: "pointer", fontSize: 11 }}>wenge.co.jp</Anchor>
+        <Anchor onClick={() => navigateTo("https://www.wenge.co.jp/")} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 11 }}>wenge.co.jp</Anchor>
       </div>
 
       {fallbackNotice && (

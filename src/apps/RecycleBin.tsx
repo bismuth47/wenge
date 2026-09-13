@@ -55,7 +55,7 @@ export function RecycleBinApp({ playSound }: { playSound?: () => void }) {
             </thead>
             <tbody>
               {items.map((it) => (
-                <tr key={it.id} onClick={() => setSelected(it.id)} onDoubleClick={() => restore(it.id)} style={{ borderBottom: "1px solid #c0c0c0", background: selected === it.id ? "#000080" : "transparent", color: selected === it.id ? "#fff" : "#000", cursor: "pointer" }}>
+                <tr key={it.id} onClick={() => setSelected(it.id)} onDoubleClick={() => restore(it.id)} style={{ borderBottom: "1px solid #c0c0c0", background: selected === it.id ? "#000080" : "transparent", color: selected === it.id ? "#fff" : "#000", cursor: "url('/cursors/hand.png') 12 0, pointer" }}>
                   <td style={{ padding: 4, display: "flex", alignItems: "center", gap: 4 }}>
                     <img
                       src={ICONS.fileWindows}
