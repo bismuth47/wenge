@@ -79,11 +79,10 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const [historyStack, setHistoryStack] = useState<string[]>([]);
   const [hIndex, setHIndex] = useState(-1);
   const hIndexRef = useRef(-1);
-  const [useProxy, setUseProxy] = useState(true);
+  // 全サイトをプロキシ経由で表示する (直接表示は廃止: 右クリック横取り・XFO/CSP回避のため)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("準備完了 - URLまたは検索ワードを入力してください");
-  const [probeInfo, setProbeInfo] = useState<string | null>(null);
   const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -97,7 +96,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const ctxCleanupRef = useRef<(() => void) | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const probeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     hIndexRef.current = hIndex;
@@ -125,9 +123,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const iframeSrc = vfsHtml
     ? "about:blank"
     : currentUrl
-      ? useProxy
-        ? `/api/proxy?url=${encodeURIComponent(currentUrl)}`
-        : currentUrl
+      ? `/api/proxy?url=${encodeURIComponent(currentUrl)}`
       : "about:blank";
 
   useEffect(() => {
@@ -136,30 +132,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     if (!iframe) return;
     iframe.srcdoc = vfsHtml;
   }, [vfsHtml]);
-
-  const doProbe = useCallback(async (targetUrl: string) => {
-    probeAbortRef.current?.abort();
-    const ac = new AbortController();
-    probeAbortRef.current = ac;
-    try {
-      setProbeInfo(null);
-      const res = await fetch(`/api/proxy?probe=1&url=${encodeURIComponent(targetUrl)}`, {
-        signal: ac.signal,
-      });
-      if (!res.ok) return false;
-      const data = await res.json().catch(() => null);
-      if (!data) return false;
-      if (data.blocked) {
-        const reason = data.xFrameOptions ? `X-Frame-Options: ${data.xFrameOptions}` : data.csp ? `CSP: ${String(data.csp).slice(0, 80)}` : "frame-ancestors restricted";
-        setProbeInfo(reason);
-        return true;
-      }
-      return false;
-    } catch (e: any) {
-      if (e?.name === "AbortError") return false;
-      return false;
-    }
-  }, []);
 
   // Check proxy response for DDG bot block before committing iframe
   const checkDdgBlocked = useCallback(async (proxyUrl: string): Promise<{ blocked: boolean; code: string | null; email: string | null }> => {
@@ -191,7 +163,8 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   }, []);
 
   const navigateTo = useCallback(
-    async (raw: string, opts?: { replaceHistory?: boolean; forceProxy?: boolean }) => {
+    (raw: string, opts?: { replaceHistory?: boolean; forceProxy?: boolean }) => {
+      void opts;
       const trimmed = raw.trim();
       if (!trimmed) {
         setError("URLまたは検索ワードを入力してください。");
@@ -200,7 +173,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       }
 
       let targetUrl: string;
-      let forceProxyForThisNav = opts?.forceProxy ?? false;
       let searchQuery: string | null = null;
       if (isProbablyUrl(trimmed)) {
         const normalized = normalizeUrl(trimmed);
@@ -214,7 +186,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         searchQuery = trimmed;
         // Bingをデフォルト検索に: Vercel IPでDDG htmlは恒久202ブロックのため
         targetUrl = toBingUrl(trimmed);
-        forceProxyForThisNav = true;
       }
 
       setError(null);
@@ -241,34 +212,17 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         });
       }
 
-      // 検索ワードはBing主で窓内表示（DDG htmlはVercelで恒久202ブロックのため事前チェック不要）
-      if (searchQuery) {
-        setCurrentUrl(targetUrl);
-        setAddress(targetUrl);
-        setUseProxy(true);
-        setStatusText(`Bingで検索(プロキシ経由): ${searchQuery}`);
-        setLoading(false);
-        return;
-      }
-
+      // 全サイトをプロキシ経由で窓内表示
       setCurrentUrl(targetUrl);
       setAddress(targetUrl);
-
-      if (forceProxyForThisNav) {
-        setUseProxy(true);
-        setLoading(false);
-        return;
-      }
-
-      setUseProxy(false);
-      const shouldProxy = await doProbe(targetUrl);
-      if (shouldProxy) {
-        setUseProxy(true);
+      if (searchQuery) {
+        setStatusText(`Bingで検索(プロキシ経由): ${searchQuery}`);
+      } else {
         setStatusText(`互換表示(プロキシ経由)で開いています: ${targetUrl}`);
       }
       setLoading(false);
     },
-    [doProbe, checkDdgBlocked],
+    [],
   );
 
   useEffect(() => {
@@ -293,7 +247,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setLoading(true);
     setCurrentUrl(url);
     setAddress(url);
-    doProbe(url).then((blocked) => setUseProxy(blocked)).finally(() => setLoading(false));
+    setLoading(false);
   };
 
   const goForward = () => {
@@ -309,7 +263,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setLoading(true);
     setCurrentUrl(url);
     setAddress(url);
-    doProbe(url).then((blocked) => setUseProxy(blocked)).finally(() => setLoading(false));
+    setLoading(false);
   };
 
   const handleRefresh = () => {
@@ -319,11 +273,8 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setFallbackNotice(null);
     setLoading(true);
     setStatusText(`Refreshing ${currentUrl}...`);
-    doProbe(currentUrl).then((blocked) => {
-      if (blocked && !useProxy) setUseProxy(true);
-      setReloadKey((k) => k + 1);
-      setLoading(false);
-    });
+    setReloadKey((k) => k + 1);
+    setLoading(false);
   };
 
   const [reloadKey, setReloadKey] = useState(0);
@@ -394,7 +345,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   };
 
   const injectCursorStyles = () => {
-    if (!useProxy) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
     let doc: Document | null = null;
@@ -444,13 +394,12 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
             setFallbackNotice("DDGブロックを検出 → Bingで代替表示します（Win95窓内）。");
             setCurrentUrl(bingUrl);
             setAddress(bingUrl);
-            setUseProxy(true);
             return;
           }
         }
       }
     } catch {}
-    setStatusText(useProxy ? `互換表示(プロキシ経由): ${currentUrl}` : `Document done: ${currentUrl}`);
+    setStatusText(`互換表示(プロキシ経由): ${currentUrl}`);
     setError(null);
 
     // Attach link interceptor for VFS downloads (media files, archives, etc.)
@@ -464,13 +413,8 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
 
   const handleIframeError = () => {
     setLoading(false);
-    if (!useProxy) {
-      setStatusText("表示に失敗しました。互換表示に切り替えています...");
-      setUseProxy(true);
-    } else {
-      setError("ページの読み込みに失敗しました。別の検索で試してください。");
-      setStatusText("Error loading document");
-    }
+    setError("ページの読み込みに失敗しました。別の検索で試してください。");
+    setStatusText("Error loading document");
   };
 
   /** iframe内のDLリンク（拡張子ベース）を横取りしてVFSに保存する */
@@ -512,7 +456,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     return cleanup;
   }, [currentUrl]);
 
-  /** iframe内の右クリックを横取りしてWenge内メニューを出す(同一オリジン=プロキシ/srcdoc時のみ有効) */
+  /** iframe内の右クリックを横取りしてWenge内メニューを出す(プロキシ/srcdocは同一オリジンのため介入可) */
   const attachIeContextMenu = useCallback(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -520,7 +464,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     try {
       doc = iframe.contentDocument;
     } catch {
-      // クロスオリジン(direct表示)では介入不可 → 実機メニューが出る。プロキシ表示を使うこと。
+      // プロキシ経由は同一オリジンのため通常ここには来ない
       return;
     }
     if (!doc) return;
@@ -642,29 +586,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setIeMenu({ x: e.clientX, y: e.clientY });
   };
 
-  useEffect(() => {
-    if (!currentUrl || useProxy || loading === false) return;
-    const t = setTimeout(() => {
-      const iframe = iframeRef.current;
-      if (!iframe) return;
-      try {
-        const doc = iframe.contentDocument;
-        if (doc) {
-          const bodyText = doc.body?.innerText?.slice(0, 200) || "";
-          const title = doc.title || "";
-          if (!bodyText && !title) {
-            setUseProxy(true);
-            setStatusText("直接表示がブロックされたため互換表示に切り替えました");
-          } else if (bodyText.includes("Refused to display") || bodyText.includes("X-Frame-Options") || title.includes("Error")) {
-            setUseProxy(true);
-            setStatusText("直接表示がブロックされたため互換表示に切り替えました");
-          }
-        }
-      } catch {}
-    }, 2500);
-    return () => clearTimeout(t);
-  }, [currentUrl, useProxy, loading, reloadKey]);
-
   // Fix cursor reset when IE is active - prevent global cursor from overriding
   useEffect(() => {
     if (!currentUrl) return;
@@ -696,14 +617,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       iframe.removeEventListener('mouseleave', mouseLeaveHandler);
     };
   }, [currentUrl, injectCursorStyles, iframeRef]);
-
-  useEffect(() => {
-    if (!currentUrl) return;
-    doProbe(currentUrl).then((blocked) => {
-      if (blocked) setUseProxy(true);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const canBack = hIndex > 0;
   const canForward = hIndex < historyStack.length - 1;
@@ -751,8 +664,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        {probeInfo && useProxy && <span style={{ fontSize: 10, color: "#808000", background: "#ffffe1", border: "1px solid #c0c0c0", padding: "1px 4px" }}>自動切替: {probeInfo}</span>}
-        <span style={{ fontSize: 10, color: "#808080" }}>{useProxy ? "via /api/proxy" : "direct"} · 右クリックメニューから切替可</span>
+        <span style={{ fontSize: 10, color: "#808080" }}>via /api/proxy (全サイト互換表示)</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
         </div>
@@ -800,7 +712,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         <Frame variant="well" style={{ background: "#ffffe1", padding: "6px 8px", fontSize: 11, color: "#800000", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <span>⚠ {error}</span>
           <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-            {!useProxy && <Button size="sm" onClick={() => setUseProxy(true)}>互換表示で再試行</Button>}
             <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
           </div>
         </Frame>
@@ -810,7 +721,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         {(currentUrl || vfsHtml) ? (
           <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
             <iframe
-              key={`${iframeSrc}::${reloadKey}::${useProxy ? "proxy" : "direct"}`}
+              key={`${iframeSrc}::${reloadKey}::proxy`}
               ref={iframeRef}
               src={iframeSrc}
               title="Wenge IE"
@@ -846,7 +757,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
 
       <div style={{ fontSize: 11, background: "#c0c0c0", border: "2px inset", padding: "2px 6px", display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUrl ? statusText : "準備完了"}</span>
-        <span style={{ flexShrink: 0, color: "#808080" }}>{currentUrl ? (useProxy ? "Proxy" : "Direct") : "0 pages"} | {historyStack.length} pages</span>
+        <span style={{ flexShrink: 0, color: "#808080" }}>{currentUrl ? "Proxy" : "0 pages"} | {historyStack.length} pages</span>
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}></div>
@@ -969,21 +880,9 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
                 ページをWengeに保存
               </MenuListItem>
               <Separator />
-              <MenuListItem
-                onClick={() => {
-                  setUseProxy((v) => !v);
-                  setIeMenu(null);
-                  setStatusText(useProxy ? "直接表示に切替 (頁内右クリックは実機メニューになります)" : "互換表示(プロキシ経由)に切替");
-                }}
-                style={{ fontSize: 11 }}
-              >
-                {useProxy ? "✓ " : ""}互換表示(プロキシ経由)
-              </MenuListItem>
-              {!useProxy && (
-                <div style={{ fontSize: 10, color: "#808080", padding: "2px 8px", lineHeight: 1.4 }}>
-                  直接表示では頁内の右クリックは実機メニューになります
-                </div>
-              )}
+              <div style={{ fontSize: 10, color: "#808080", padding: "2px 8px", lineHeight: 1.4 }}>
+                ✓ 互換表示(プロキシ経由)
+              </div>
             </MenuList>
           </div>
         </>
