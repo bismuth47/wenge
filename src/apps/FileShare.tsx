@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
-import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, type R2File } from "../lib/r2";
+import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, createR2Folder, type R2File } from "../lib/r2";
 import { handleDownload } from "../lib/downloadTarget";
 
 type FileItem = R2File;
@@ -57,16 +57,13 @@ export function FileShareApp() {
           if (j === pathParts.length - 1) {
             // Last part is the file name
             fullKey += pathParts[j];
+            // Presigned PUT flow via shared lib (server signs, browser PUTs to R2)
+            await uploadToR2(fullKey, file);
           } else {
             // Intermediate directory - create it first
-            // For now, we'll just build the path without creating intermediate folders
-            // as R2 has no real folders - the prefix handles the path
-            fullKey += pathParts[j] + '/';
+            await createR2Folder(prefix, pathParts[j]);
           }
         }
-        
-        // Presigned PUT flow via shared lib (server signs, browser PUTs to R2)
-        await uploadToR2(fullKey, file);
         setProgress(Math.min(90, 10 + Math.round((i + 1) / filesToUpload.length * 80)));
       }
       await fetchFiles();
