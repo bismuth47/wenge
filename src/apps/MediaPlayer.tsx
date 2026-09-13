@@ -145,20 +145,24 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
 
   const togglePlay = () => {
     if (!current) return;
-    if (playing) setPlaying(false);
-    else {
+    const audio = ensureAudio();
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+    } else {
       // if stopped at end, restart
-      const audio = ensureAudio();
       if (audio.currentTime >= (audio.duration || 0) - 0.2) audio.currentTime = 0;
       setPlaying(true);
     }
   };
   const stop = () => {
     const audio = ensureAudio();
-    audio.pause();
-    audio.currentTime = 0;
-    setPlaying(false);
-    setStatus("Stopped");
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      setPlaying(false);
+      setStatus("Stopped");
+    }
   };
   const next = () => {
     setIndex((i) => (i + 1) % tracks.length);
