@@ -59,6 +59,12 @@ const GlobalStyle = createGlobalStyle`
   .w95-appstarting, .w95-appstarting * {
     cursor: url('/cursors/appstarting.png') 0 0, progress !important;
   }
+  /* IE読込中: 窓内だけ待機カーソル (矢印+砂時計)。iframe文書入替の隙に
+     OS標準カーソルへ戻るのを防ぐ。iframe内部は読込オーバーレイが覆うため
+     親側のこの指定で全体がカバーされる。 */
+  .w95-ie-loading, .w95-ie-loading * {
+    cursor: url('/cursors/appstarting.png') 0 0, progress !important;
+  }
   /* ===== macOS対策: ネイティブスクロールバーを完全に非表示化 =====
    * macOS (WebKit/Blink) では「スクロールバーを表示: スクロール時」がONだと
    * オーバーレイスクロールバーがOS描画され、::-webkit-scrollbar の幅・色・

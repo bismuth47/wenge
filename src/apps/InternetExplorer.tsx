@@ -79,6 +79,10 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const [historyStack, setHistoryStack] = useState<string[]>([]);
   const [hIndex, setHIndex] = useState(-1);
   const hIndexRef = useRef(-1);
+  const currentUrlRef = useRef("");
+  useEffect(() => {
+    currentUrlRef.current = currentUrl;
+  }, [currentUrl]);
   // 全サイトをプロキシ経由で表示する (直接表示は廃止: 右クリック横取り・XFO/CSP回避のため)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,7 +216,14 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         });
       }
 
-      // 全サイトをプロキシ経由で窓内表示
+      // 全サイトをプロキシ経由で窓内表示。
+      // loadingはiframeのonLoad/onErrorまで維持する (同期的にfalseに戻すと
+      // 読込中のカーソル・ProgressBar表示が消えてしまう)。
+      // 同一URLへの再遷移はsrcが変わらずonLoadが来ないためreloadKeyで強制再マウントする。
+      if (targetUrl === currentUrlRef.current) {
+        setReloadKey((k) => k + 1);
+      }
+      currentUrlRef.current = targetUrl;
       setCurrentUrl(targetUrl);
       setAddress(targetUrl);
       if (searchQuery) {
@@ -220,7 +231,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       } else {
         setStatusText(`互換表示(プロキシ経由)で開いています: ${targetUrl}`);
       }
-      setLoading(false);
     },
     [],
   );
@@ -244,10 +254,10 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setFallbackNotice(null);
     setVfsHtml(null);
     setStatusText(`Opening ${url}...`);
+    // onLoadまで維持 (下でfalseに戻さない)
     setLoading(true);
     setCurrentUrl(url);
     setAddress(url);
-    setLoading(false);
   };
 
   const goForward = () => {
@@ -260,10 +270,10 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setFallbackNotice(null);
     setVfsHtml(null);
     setStatusText(`Opening ${url}...`);
+    // onLoadまで維持 (下でfalseに戻さない)
     setLoading(true);
     setCurrentUrl(url);
     setAddress(url);
-    setLoading(false);
   };
 
   const handleRefresh = () => {
@@ -274,7 +284,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setLoading(true);
     setStatusText(`Refreshing ${currentUrl}...`);
     setReloadKey((k) => k + 1);
-    setLoading(false);
+    // onLoadでfalseに戻る
   };
 
   const [reloadKey, setReloadKey] = useState(0);
@@ -296,6 +306,16 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const handleAddressKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") navigateTo(address);
   };
+
+  // onLoadが来ないまま固まった場合の安全弁 (20秒で読込表示・待機カーソルを解除)
+  useEffect(() => {
+    if (!loading) return;
+    const t = window.setTimeout(() => {
+      setLoading(false);
+      setStatusText((s) => (s.startsWith("Opening") || s.startsWith("Refreshing") ? `${s} (timed out)` : s));
+    }, 20000);
+    return () => window.clearTimeout(t);
+  }, [loading, currentUrl, reloadKey]);
 
   // Save the current page to Wenge VFS via /api/proxy
   const handleSave = async () => {
@@ -652,7 +672,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   };
 
   return (
-    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
+    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} className={loading ? "w95-ie-loading" : undefined} style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
       <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
         <Button size="sm" disabled={!canBack} onClick={goBack}>◀ Back</Button>
         <Button size="sm" disabled={!canForward} onClick={goForward}>▶ Forward</Button>
@@ -721,7 +741,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         {(currentUrl || vfsHtml) ? (
           <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
             <iframe
-              key={`${iframeSrc}::${reloadKey}::proxy`}
+              key={`${iframeSrc}::${reloadKey}::${hIndex}::proxy`}
               ref={iframeRef}
               src={iframeSrc}
               title="Wenge IE"
@@ -773,8 +793,19 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           <div
             style={{
               position: "fixed",
-              left: Math.max(4, Math.min(ieMenu.x, window.innerWidth - 230)),
-              top: Math.max(4, Math.min(ieMenu.y, window.innerHeight - 320)),
+              // カーソルの右側に開く (実機同様)。右端・下端では画面内に収まるよう反転する。
+              left: (() => {
+                const w = 264;
+                const right = ieMenu.x + 2;
+                if (right + w <= window.innerWidth) return Math.max(4, right);
+                return Math.max(4, ieMenu.x - w);
+              })(),
+              top: (() => {
+                const h = 330;
+                const below = ieMenu.y + 2;
+                if (below + h <= window.innerHeight) return Math.max(4, below);
+                return Math.max(4, window.innerHeight - h);
+              })(),
               zIndex: 9991,
               minWidth: 210,
               maxWidth: 260,
