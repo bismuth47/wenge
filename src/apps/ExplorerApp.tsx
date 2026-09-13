@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button, Frame, MenuList, MenuListItem, ProgressBar, Separator, TextInput } from "react95";
 import { showConfirm, showError, showInfo } from "../components/SystemDialog";
 import { ICONS } from "../assets/icons";
@@ -25,6 +25,12 @@ import {
   registerWengeDrop,
   DRAG_THRESHOLD_PX,
 } from "../lib/pointerDrag";
+
+interface FileInputWithDirectory extends HTMLInputElement {
+  webkitdirectory?: boolean;
+  directory?: boolean;
+  mozdirectory?: boolean;
+}
 import {
   DOWNLOADS_CHANGED_EVENT,
   deleteDownload,
