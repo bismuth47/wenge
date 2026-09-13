@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styled from "styled-components";
+import { getViewMetrics } from "../lib/display";
+
+// 仮想解像度の描画スケール。画面px計測値を論理pxに換算する (default 1)。
+const viewScale = () => {
+  const s = getViewMetrics().scale;
+  return s > 0 ? s : 1;
+};
 
 /**
  * macOSのオーバーレイスクロールバー対策としてのWin95風カスタムスクロールバー。
@@ -34,6 +41,9 @@ const Viewport = styled.div`
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
   -webkit-overflow-scrolling: touch;
@@ -43,6 +53,10 @@ const Viewport = styled.div`
     width: 0px !important;
     height: 0px !important;
     -webkit-appearance: none !important;
+  }
+  & > * {
+    flex: 1 0 auto;
+    min-height: 0;
   }
 `;
 
@@ -311,7 +325,7 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
       if (!el || !track) return;
       if ((e.target as HTMLElement).closest("[data-thumb]")) return;
       const rect = track.getBoundingClientRect();
-      const clickY = e.clientY - rect.top;
+      const clickY = (e.clientY - rect.top) / viewScale();
       if (clickY < v.thumbTop) el.scrollBy({ top: -el.clientHeight + 20 });
       else el.scrollBy({ top: el.clientHeight - 20 });
     },
@@ -325,7 +339,7 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
       if (!el || !track) return;
       if ((e.target as HTMLElement).closest("[data-thumb]")) return;
       const rect = track.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
+      const clickX = (e.clientX - rect.left) / viewScale();
       if (clickX < h.thumbLeft) el.scrollBy({ left: -el.clientWidth + 20 });
       else el.scrollBy({ left: el.clientWidth - 20 });
     },
@@ -344,7 +358,7 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
       // 計測はイベント時点の実寸で (staleなstateを使わない)
       const tH = Math.max(1, track.clientHeight - (geoRef.current.vThumbH || 16));
       const range = Math.max(1, el.scrollHeight - el.clientHeight);
-      const dy = ev.clientY - startY;
+      const dy = (ev.clientY - startY) / viewScale();
       el.scrollTop = startTop + (dy / tH) * range;
     };
     const onUp = () => {
@@ -366,7 +380,7 @@ export function Win95Scroll({ children, className, style, autoHide = false, step
     const onMove = (ev: MouseEvent) => {
       const tW = Math.max(1, track.clientWidth - (geoRef.current.hThumbW || 16));
       const range = Math.max(1, el.scrollWidth - el.clientWidth);
-      const dx = ev.clientX - startX;
+      const dx = (ev.clientX - startX) / viewScale();
       el.scrollLeft = startLeft + (dx / tW) * range;
     };
     const onUp = () => {

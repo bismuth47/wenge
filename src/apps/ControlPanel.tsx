@@ -3,12 +3,42 @@ import { Button, Checkbox, Fieldset, Radio, Select, Slider } from "react95";
 import { getSoundEnabled, setSoundEnabled, SOUNDS } from "../hooks/useSound";
 import { showInfo } from "../components/SystemDialog";
 import { DL_TARGET_EVENT, getDownloadSetting, setDownloadSetting, type DownloadSetting } from "../lib/downloadTarget";
+import {
+  RESOLUTION_EVENT,
+  RESOLUTIONS,
+  UI_SCALE_EVENT,
+  UI_SCALES,
+  enterFullscreen,
+  exitFullscreen,
+  getResolution,
+  getUiScale,
+  isFullscreen,
+  setResolution,
+  setUiScale,
+  type ResolutionId,
+  type UiScale,
+} from "../lib/display";
 
 export function ControlPanelApp() {
   const [bg, setBg] = useState(() => {
     try { return localStorage.getItem("wenge_bg") ?? "#008080"; } catch { return "#008080"; }
   });
-  const [res, setRes] = useState("800x600");
+  const [resolution, setResolutionState] = useState<ResolutionId>(() => getResolution());
+  const [uiScale, setUiScaleState] = useState<UiScale>(() => getUiScale());
+  const [fullscreen, setFullscreen] = useState(() => isFullscreen());
+  useEffect(() => {
+    const onRes = (e: Event) => setResolutionState((e as CustomEvent<ResolutionId>).detail);
+    const onScale = (e: Event) => setUiScaleState((e as CustomEvent<UiScale>).detail);
+    const onFs = () => setFullscreen(isFullscreen());
+    window.addEventListener(RESOLUTION_EVENT, onRes);
+    window.addEventListener(UI_SCALE_EVENT, onScale);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => {
+      window.removeEventListener(RESOLUTION_EVENT, onRes);
+      window.removeEventListener(UI_SCALE_EVENT, onScale);
+      document.removeEventListener("fullscreenchange", onFs);
+    };
+  }, []);
   const [volume, setVolume] = useState(70);
   const [soundEnabled, setSoundEnabledState] = useState(() => getSoundEnabled());
   useEffect(() => { setSoundEnabled(soundEnabled); }, [soundEnabled]);
@@ -36,9 +66,27 @@ export function ControlPanelApp() {
           <Button onClick={() => { try { localStorage.setItem("wenge_bg", bg); } catch {} try { window.dispatchEvent(new CustomEvent("wenge:bg", { detail: bg })); } catch {} document.body.style.background = bg; }}>Apply</Button>
           <div style={{ width: 24, height: 18, background: bg, border: "2px inset #fff" }} />
         </div>
-        <div style={{ marginTop: 8, display: "flex", gap: 12 }}>
-          <Radio checked={res === "800x600"} onChange={() => setRes("800x600")} name="res" value="800x600" label="800 x 600" />
-          <Radio checked={res === "1024x768"} onChange={() => setRes("1024x768")} name="res" value="1024x768" label="1024 x 768" />
+        <div style={{ marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <Radio checked={resolution === "native"} onChange={() => setResolution("native")} name="res" value="native" label="Native (full window)" />
+          {(Object.keys(RESOLUTIONS) as ResolutionId[]).map((id) => (
+            <Radio key={id} checked={resolution === id} onChange={() => setResolution(id)} name="res" value={id} label={RESOLUTIONS[id as keyof typeof RESOLUTIONS].label} />
+          ))}
+        </div>
+        <div style={{ fontSize: 10, color: "#808080", marginTop: 4 }}>
+          Native以外は画面中央に仮想画面を表示します(余白は黒帯)。ウィンドウ・アイコン位置は自動で収められます。
+        </div>
+        <div style={{ marginTop: 8, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12 }}>UI scale:</span>
+          {UI_SCALES.map((s) => (
+            <Radio key={s} checked={uiScale === s} onChange={() => setUiScale(s)} name="uiscale" value={String(s)} label={`${s}%`} />
+          ))}
+        </div>
+        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12 }}>Full screen:</span>
+          {fullscreen
+            ? <Button size="sm" onClick={() => exitFullscreen()}>Exit Full Screen</Button>
+            : <Button size="sm" onClick={() => enterFullscreen()}>Enter Full Screen</Button>}
+          <span style={{ fontSize: 11, color: "#555" }}>{fullscreen ? "全画面表示中 (Escで終了可)" : "ブラウザ全体にWengeを表示します"}</span>
         </div>
       </Fieldset>
 

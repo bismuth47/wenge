@@ -56,7 +56,7 @@ import { NetworkApp } from "./apps/Network";
 import { CdPlayerApp } from "./apps/CdPlayer";
 import { ImageViewerApp } from "./apps/ImageViewer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
-import { R2_DRAG_MIME, guessMime, listR2Flat, r2NameOfKey, type R2DragItem } from "./lib/r2";
+import { R2_DRAG_MIME, guessMime, listR2Flat, markWengeDragEnd, markWengeDragStart, r2NameOfKey, type R2DragItem, type WengeDropAction } from "./lib/r2";
 import {
   deleteDesktopDoc,
   docIconKey,
@@ -66,9 +66,24 @@ import {
   saveDocFromBlob,
   type DesktopDoc,
 } from "./lib/desktopDocs";
-import { VFS_CHANGED_EVENT } from "./lib/vfs/store";
+import { VFS_CHANGED_EVENT, copyVfsFile, getVfsFile, moveVfsFile, renameVfsFile } from "./lib/vfs/store";
+import { VFS_DESKTOP } from "./lib/vfs/types";
+import { normalizeVfsDir } from "./lib/vfs/path";
+import { useFsClipboard, setFsClipboard } from "./lib/fsClipboard";
+import { onSendToDesktop } from "./lib/desktopDropBridge";
+import { beginFileDragSession, cancelFileDragSession, createFileDragGhost, finishFileDragSession, initPointerDragCleanup, isFileDragging, moveFileDragSession, registerWengeDrop, DRAG_THRESHOLD_PX } from "./lib/pointerDrag";
 import { setPendingVfsFile, vfsOpenTarget } from "./lib/vfs/openWith";
 import type { VfsFile } from "./lib/vfs/types";
+import {
+  RESOLUTION_EVENT,
+  RESOLUTIONS,
+  UI_SCALE_EVENT,
+  getResolution,
+  getUiScale,
+  setViewMetrics,
+  type ResolutionId,
+  type UiScale,
+} from "./lib/display";
 
 // --- Types ---
 type AppId =
@@ -122,16 +137,29 @@ type WinState = {
 };
 
 // --- Styled ---
-const Desktop = styled.div<{ $bg?: string }>`
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
+// 画面全体のステージ。仮想解像度モード時は黒帯レターボックス、Native時は壁紙色で全面。
+const ScreenStage = styled.div<{ $virtual: boolean; $bg?: string }>`
+  position: fixed;
+  inset: 0;
+  background: ${(p) => (p.$virtual ? "#000" : (p.$bg ?? "#008080"))};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+`;
+
+const Desktop = styled.div<{ $bg?: string; $w?: number; $h?: number }>`
+  width: ${(p) => (p.$w != null ? `${p.$w}px` : "100vw")};
+  height: ${(p) => (p.$h != null ? `${p.$h}px` : "100vh")};
+  ${(p) => (p.$h == null ? "height: 100dvh;" : "")}
   background: ${(p) => p.$bg ?? "#008080"};
   position: relative;
   overflow: hidden;
   padding-bottom: 30px;
   box-sizing: border-box;
-  min-width: 320px;
+  flex-shrink: 0;
+  /* Pointer Eventsドラッグ用: タッチのスクロール横取りを防ぐ */
+  touch-action: none;
 `;
 
 // Absolute positioned icons container
@@ -207,19 +235,48 @@ const SelectionRect = styled.div<{ $x:number; $y:number; $w:number; $h:number }>
 `;
 
 const ContextMenu = styled.div<{ $x:number; $y:number }>`
-  position: fixed;
+  position: absolute;
   left: ${(p)=>p.$x}px;
   top: ${(p)=>p.$y}px;
   z-index: 9998;
-  min-width: 180px;
+  min-width: 132px;
+  max-width: 200px;
   background: #c0c0c0;
   border: 2px outset #fff;
   padding: 2px;
   font-size: 11px;
+  & ul {
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    flex-direction: column;
+    gap: 0 !important;
+  }
+  & li {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  & [role="menuitem"] {
+    font-size: 11px !important;
+    line-height: 1.15 !important;
+    min-height: 0 !important;
+    height: 18px !important;
+    margin: 0 !important;
+    padding: 0 12px 0 20px !important;
+    display: flex !important;
+    align-items: center !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 196px;
+  }
+  & hr {
+    margin: 0 1px !important;
+  }
 `;
 
 const Taskbar = styled(AppBar)`
-  position: fixed !important;
+  position: absolute !important;
   bottom: 0 !important;
   top: auto !important;
   left: 0 !important;
@@ -275,7 +332,7 @@ const StartButton = styled.button<{ $active?: boolean }>`
 `;
 
 const StartMenuWrap = styled.div`
-  position: fixed;
+  position: absolute;
   left: 2px;
   bottom: 32px;
   z-index: 9998;
@@ -292,7 +349,7 @@ const StartMenuWrap = styled.div`
 `;
 
 const VolumePopup = styled.div`
-  position: fixed;
+  position: absolute;
   bottom: 34px;
   right: 6px;
   z-index: 9998;
@@ -312,29 +369,33 @@ const VolumePopup = styled.div`
 // top:-4 に固定すると、高さ620pxに対して行位置y=406 → 下端1026が画面外
 // (700px画面) にはみ出し、下部項目がスクロールでも到達不可に見えた。
 // 実機Win95と同様、下端がタスクバーに掛かる場合は上へずらして収める。
-function ProgramsSubmenu({ children }: { children: React.ReactNode }) {
+function ProgramsSubmenu({ children, scale = 1, viewH }: { children: React.ReactNode; scale?: number; viewH?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const adjust = () => {
       el.style.top = "-4px";
+      const s = scale > 0 ? scale : 1;
+      // transform scale下ではgetBoundingClientRectが画面pxを返すため、
+      // 仮想画面原点基準の仮想pxに換算して比較する。
+      const screenTop = document.getElementById("wenge-virtual-screen")?.getBoundingClientRect().top ?? 0;
       const r = el.getBoundingClientRect();
-      const maxBottom = window.innerHeight - 34; // タスクバー分を除外
-      if (r.bottom > maxBottom) {
-        el.style.top = `${-4 - (r.bottom - maxBottom)}px`;
+      const maxBottom = (viewH ?? window.innerHeight) - 34; // タスクバー分を除外
+      if ((r.bottom - screenTop) / s > maxBottom) {
+        el.style.top = `${-4 - ((r.bottom - screenTop) / s - maxBottom)}px`;
       }
       const r2 = el.getBoundingClientRect();
-      if (r2.top < 2) {
-        el.style.top = `${parseFloat(el.style.top || "-4") - r2.top + 2}px`;
+      if ((r2.top - screenTop) / s < 2) {
+        el.style.top = `${parseFloat(el.style.top || "-4") - (r2.top - screenTop) / s + 2}px`;
       }
     };
     adjust();
     window.addEventListener("resize", adjust);
     return () => window.removeEventListener("resize", adjust);
-  }, []);
+  }, [scale, viewH]);
   return (
-    <div ref={ref} style={{ position:"absolute", left:"100%", top:-4, width:216, maxHeight:"calc(100dvh - 80px)", zIndex:9999, display:"flex", flexDirection:"column", minHeight:0, cursor: "url('/cursors/arrow.png') 0 0, default" }}>
+    <div ref={ref} style={{ position:"absolute", left:"100%", top:-4, width:216, maxHeight: viewH != null ? `${viewH - 80}px` : "calc(100dvh - 80px)", zIndex:9999, display:"flex", flexDirection:"column", minHeight:0, cursor: "url('/cursors/arrow.png') 0 0, default" }}>
       {children}
     </div>
   );
@@ -439,7 +500,7 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   "file-share": { title: "File Share", icon: ICON_FALLBACK.fileShare, iconSrc: ICONS.fileShare, w: 520, h: 400, component: <FileShareApp /> },
   chat: { title: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat, w: 420, h: 440, component: <ChatApp /> },
   about: { title: "About Wenge", icon: ICON_FALLBACK.about, iconSrc: ICONS.about, w: 380, h: 340, component: <AboutWengeApp /> },
-  control: { title: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel, w: 460, h: 380, component: <ControlPanelApp /> },
+  control: { title: "Control Panel", icon: ICON_FALLBACK.controlPanel, iconSrc: ICONS.controlPanel, w: 460, h: 460, component: <ControlPanelApp /> },
   minesweeper: { title: "Minesweeper", icon: ICON_FALLBACK.minesweeper, iconSrc: ICONS.minesweeper, w: 340, h: 380, component: <MinesweeperApp /> },
   "media-player": { title: "Media Player", icon: ICON_FALLBACK.mediaPlayer, iconSrc: ICONS.mediaPlayer, w: 520, h: 460, component: <MediaPlayerApp /> },
   paint: { title: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
@@ -496,8 +557,10 @@ function PaintApp() {
     ctx.fillRect(0, 0, c.width, c.height);
   }, []);
   const getPos = (e: React.MouseEvent) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    // transform scale下でも正しく描画できるよう実ピクセル換算する
+    return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -661,8 +724,18 @@ const [dragging,setDragging]=useState<{id:AppId, offsetX:number, offsetY:number,
 const [multiDrag, setMultiDrag]=useState<Record<string,{x:number,y:number}>|null>(null);
 const [selectionRect,setSelectionRect]=useState<{x0:number,y0:number,x1:number,y1:number}|null>(null);
 const suppressDesktopClick=useRef(false);
-const [contextMenu,setContextMenu]=useState<{x:number,y:number}|null>(null);
+type IconCtxTarget =
+  | { kind: "app"; id: AppId; label: string }
+  | { kind: "doc"; key: string; docId: string; label: string }
+  | { kind: "shortcut"; key: string; label: string }
+  | { kind: "run" };
+const [contextMenu,setContextMenu]=useState<{x:number,y:number; target?: IconCtxTarget} | null>(null);
+// Win95風アイコンメニュー用の編集・クリップボード状態
+const [renamingId, setRenamingId]=useState<string | null>(null);
+const [renameValue, setRenameValue]=useState("");
+const clipboard = useFsClipboard();
 const longPressTimer=useRef<number|null>(null);
+const touchPidRef=useRef<number|null>(null);
 const [startOpen, setStartOpen] = useState(false);
 const [programsOpen, setProgramsOpen] = useState(false);
 const [documentsOpen, setDocumentsOpen] = useState(false);
@@ -680,14 +753,58 @@ const [showBsod, setShowBsod] = useState(false);
     window.addEventListener("wenge:bg", onBg);
     return () => window.removeEventListener("wenge:bg", onBg);
   }, []);
+
+// --- Display settings (仮想解像度 + UIスケール) ---
+// viewW/viewH: レイアウト上の論理px。UIスケール分で割ることで拡大時も画面内に収まる。
+// viewScale: 論理px→画面pxの描画倍率 (fit × ui)。マウス座標の換算に使う。
+const [resolution, setResolution] = useState<ResolutionId>(() => getResolution());
+const [uiScale, setUiScale] = useState<UiScale>(() => getUiScale());
+const [winSize, setWinSize] = useState(() => ({
+  w: typeof window !== "undefined" ? window.innerWidth : 1024,
+  h: typeof window !== "undefined" ? window.innerHeight : 768,
+}));
+useEffect(() => {
+  const onRes = (e: Event) => setResolution((e as CustomEvent<ResolutionId>).detail);
+  const onScale = (e: Event) => setUiScale((e as CustomEvent<UiScale>).detail);
+  const onResize = () => setWinSize({ w: window.innerWidth, h: window.innerHeight });
+  window.addEventListener(RESOLUTION_EVENT, onRes);
+  window.addEventListener(UI_SCALE_EVENT, onScale);
+  window.addEventListener("resize", onResize);
+  return () => {
+    window.removeEventListener(RESOLUTION_EVENT, onRes);
+    window.removeEventListener(UI_SCALE_EVENT, onScale);
+    window.removeEventListener("resize", onResize);
+  };
+}, []);
+const virtRes = resolution === "native" ? null : RESOLUTIONS[resolution];
+const virtW = virtRes ? virtRes.w : winSize.w;
+const virtH = virtRes ? virtRes.h : winSize.h;
+const uiFactor = uiScale / 100;
+const fitScale = Math.min(winSize.w / virtW, winSize.h / virtH);
+const viewScale = fitScale * uiFactor;
+const viewW = virtW / uiFactor;
+const viewH = virtH / uiFactor;
+const isVirtualScreen = resolution !== "native" || uiScale !== 100;
+// client座標(画面px)→仮想論理px。Native等倍時はそのまま返す。
+const toVirtual = (clientX: number, clientY: number) => {
+  const rect = desktopRef.current?.getBoundingClientRect();
+  if (!rect || viewScale <= 0) return { x: clientX, y: clientY };
+  return { x: (clientX - rect.left) / viewScale, y: (clientY - rect.top) / viewScale };
+};
+// WindowFrame外の部品(IE右クリックメニュー・スクロールバー等)が座標換算に使う
+useEffect(() => {
+  setViewMetrics({ scale: viewScale, w: viewW, h: viewH });
+}, [viewScale, viewW, viewH]);
 const maxZ = useRef(20);
 const [startupPlayed, setStartupPlayed] = useState(false);
 const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; icon: string; iconSrc: string }[]>(()=>{
+  const chatEntry = { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat };
   const fallback=[
     { id: "my-computer", label: "My Computer", icon: ICON_FALLBACK.myComputer, iconSrc: ICONS.myComputer },
     { id: "recycle", label: "Recycle Bin", icon: ICON_FALLBACK.recycle, iconSrc: ICONS.recycle },
     { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
     { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
+    { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
     { id: "help", label: "Help", icon: ICON_FALLBACK.help, iconSrc: ICONS.help },
   ] as { id: AppId; label: string; icon: string; iconSrc: string }[];
   try{
@@ -696,10 +813,17 @@ const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; ico
       const parsed=JSON.parse(saved);
       if(Array.isArray(parsed)){
         const valid=parsed.filter((ic:any)=> ic && typeof ic.id==="string" && (APP_DEFS as Record<string,any>)[ic.id]);
-        if(valid.length>0) return valid.map((ic:any)=>{
-          const def=(APP_DEFS as Record<string,any>)[ic.id];
-          return { id: ic.id as AppId, label: typeof ic.label==="string"?ic.label:def.title, icon: def.icon, iconSrc: typeof ic.iconSrc==="string"?ic.iconSrc:def.iconSrc };
-        });
+        if(valid.length>0){
+          const mapped=valid.map((ic:any)=>{
+            const def=(APP_DEFS as Record<string,any>)[ic.id];
+            return { id: ic.id as AppId, label: typeof ic.label==="string"?ic.label:def.title, icon: def.icon, iconSrc: typeof ic.iconSrc==="string"?ic.iconSrc:def.iconSrc };
+          });
+          // 既存ユーザーへの移行: Wenge Chat がなければデスクトップに追加
+          if(!mapped.some((ic:any)=> ic.id==="chat")){
+            mapped.push(chatEntry as { id: AppId; label: string; icon: string; iconSrc: string });
+          }
+          return mapped;
+        }
       }
     }
   }catch{}
@@ -709,6 +833,25 @@ const [draggingFromStart, setDraggingFromStart] = useState<{id: AppId; label: st
 // VFS実体ファイル (IndexedDB永続・C:/Desktopと同期。位置はiconPosの `doc:<id>` で管理)
 const [desktopDocs, setDesktopDocs] = useState<DesktopDoc[]>([]);
 const [docDropBusy, setDocDropBusy] = useState<string | null>(null);
+// デスクトップショートカット (Explorerの静的エントリ等から作成。キーは `shortcut:<uid>`)
+// vfsId 付きは Documents/Downloads/Desktop 実体への参照 (Alt+ドロップで作成・ダブルクリックで元ファイルを開く)
+type DesktopShortcut = { key: string; label: string; iconSrc: string; appId?: string; explorerPath?: string; vfsId?: string };
+const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcut[]>(()=>{
+  try{
+    const raw=localStorage.getItem("wenge_desktop_shortcuts");
+    if(raw){
+      const parsed=JSON.parse(raw);
+      if(Array.isArray(parsed)) return parsed.filter((s:any)=> s && typeof s.key==="string" && typeof s.label==="string");
+    }
+  }catch{}
+  return [];
+});
+useEffect(()=>{
+  try{ localStorage.setItem("wenge_desktop_shortcuts", JSON.stringify(desktopShortcuts)); }catch{}
+},[desktopShortcuts]);
+// フォルダショートカットからExplorerを開く際の初期パス (キー変更で再マウントさせる)
+const [explorerInitPath, setExplorerInitPath] = useState<string | null>(null);
+const [explorerOpenKey, setExplorerOpenKey] = useState(0);
 // ダブルクリックで開くVFSファイル (appId -> file)。keyにfile.idを使い再マウントさせる
 const [vfsFileByApp, setVfsFileByApp] = useState<Record<string, DesktopDoc>>({});
 const ieFile = useMemo<VfsFile | null>(() => {
@@ -766,8 +909,8 @@ const findSpotForNew=(wantX:number|undefined,wantY:number|undefined,deskW:number
   return snapPos(wantX??12,wantY??12,deskW,deskH);
 };
 const desktopSize=()=>{
-  const rect=desktopRef.current?.getBoundingClientRect();
-  return { w: rect?.width ?? window.innerWidth, h: (rect?.height ?? window.innerHeight) - 30 };
+  // Desktop自体がviewW×viewHの論理pxで描画されるため、そのまま返す。
+  return { w: viewW, h: viewH - 30 };
 };
 // スタートメニューからのドロップでショートカット作成（既存アイコンの配置は保持する）
 const addToDesktop = (id: AppId, opts?: {label?:string; iconSrc?:string; x?:number; y?:number}) => {
@@ -780,6 +923,14 @@ const addToDesktop = (id: AppId, opts?: {label?:string; iconSrc?:string; x?:numb
   setIconPos(prev=>({...prev,[id]:pos}));
 };
 const removeFromDesktop = (id: AppId | string) => {
+  // デスクトップショートカットの削除
+  if (typeof id === "string" && id.startsWith("shortcut:")) {
+    setDesktopShortcuts((prev) => prev.filter((s) => s.key !== id));
+    setIconPos((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    setSelectedIds((prev) => { if (!prev.has(id as AppId)) return prev; const n = new Set(prev); n.delete(id as AppId); return n; });
+    playRecycle();
+    return;
+  };
   // IndexedDBに複製された実体ファイルの削除
   if (typeof id === "string" && isDocIconKey(id)) {
     const docId = docIdFromKey(id);
@@ -799,13 +950,11 @@ const removeFromDesktop = (id: AppId | string) => {
   setSelectedIds(prev=>{ if(!prev.has(appId)) return prev; const n=new Set(prev); n.delete(appId); return n; });
   playRecycle();
 };
-// カーソル位置がごみ箱アイコン上かどうか
-const isOverRecycleAt=(clientX:number,clientY:number)=>{
-  const rect=desktopRef.current?.getBoundingClientRect();
+// カーソル位置がごみ箱アイコン上かどうか (仮想論理pxで受け取る)
+const isOverRecycleAt=(vx:number,vy:number)=>{
   const rp=iconPos["recycle"];
-  if(!rect||!rp) return false;
-  const x=clientX-rect.left, y=clientY-rect.top;
-  return x>=rp.x && x<=rp.x+ICON_W && y>=rp.y && y<=rp.y+ICON_H;
+  if(!rp) return false;
+  return vx>=rp.x && vx<=rp.x+ICON_W && vy>=rp.y && vy<=rp.y+ICON_H;
 };
 
   // Initialize icon positions
@@ -815,7 +964,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     if(saved){
       try{ const p=JSON.parse(saved); setIconPos(p); return; }catch{}
     }
-    const w=window.innerWidth, h=window.innerHeight-30;
+    const w=viewW, h=viewH-30;
     const pos:Record<string,{x:number,y:number}>={};
     desktopIcons.forEach((ic,i)=> pos[ic.id]=getDefaultPos(i,w,h));
     // Run icon separate
@@ -829,22 +978,130 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     localStorage.setItem("wenge_icon_pos", JSON.stringify(iconPos));
   },[iconPos]);
 
+  // 移行で追加されたアイコン等、位置が未割当のデスクトップアイコンに配置を与える
+  useEffect(()=>{
+    setIconPos((prev)=>{
+      if(Object.keys(prev).length===0) return prev;
+      const next={ ...prev };
+      let changed=false;
+      const { w, h } = desktopSize();
+      const occupied={ ...next } as Record<string,{x:number;y:number}>;
+      const baseCount=desktopIcons.length+desktopDocs.length+desktopShortcuts.length+1;
+      desktopIcons.forEach((ic)=>{
+        if(!next[ic.id]){
+          const idx=Object.keys(next).length % Math.max(baseCount, 1);
+          const spot=getDefaultPos(idx,w,h-30);
+          next[ic.id]=spot;
+          occupied[ic.id]=spot;
+          changed=true;
+        }
+      });
+      if(!next["run"]){
+        next["run"]=getDefaultPos(desktopIcons.length,w,h-30);
+        changed=true;
+      }
+      return changed?next:prev;
+    });
+  },[desktopIcons]);
+
   // デスクトップ構成（ショートカット追加／削除）を永続化
   useEffect(()=>{
     try{ localStorage.setItem("wenge_desktop_icons", JSON.stringify(desktopIcons)); }catch{}
   },[desktopIcons]);
+  useEffect(()=>{
+    try{ localStorage.setItem("wenge_desktop_shortcuts", JSON.stringify(desktopShortcuts)); }catch{}
+  },[desktopShortcuts]);
 
   const autoArrange=()=>{
-    const w=window.innerWidth, h=window.innerHeight-30;
+    const w=viewW, h=viewH-30;
     const pos:Record<string,{x:number,y:number}>={};
     const sorted=[...desktopIcons].sort((a,b)=> a.label.localeCompare(b.label));
     sorted.forEach((ic,i)=> pos[ic.id]=getDefaultPos(i,w,h));
     const sortedDocs=[...desktopDocs].sort((a,b)=> a.name.localeCompare(b.name));
     sortedDocs.forEach((d,i)=> { pos[docIconKey(d.id)]=getDefaultPos(sorted.length+1+i,w,h); });
-    pos["run"]=getDefaultPos(sorted.length+1+sortedDocs.length,w,h);
+    const sortedSc=[...desktopShortcuts].sort((a,b)=> a.label.localeCompare(b.label));
+    sortedSc.forEach((s,i)=> { pos[s.key]=getDefaultPos(sorted.length+1+sortedDocs.length+i,w,h); });
+    pos["run"]=getDefaultPos(sorted.length+1+sortedDocs.length+sortedSc.length,w,h);
     setIconPos(pos);
     localStorage.setItem("wenge_icon_pos", JSON.stringify(pos));
   };
+
+  // Line up Icons: 並べ替えはせず、現在の位置をグリッドにスナップする
+  const lineUpIcons=()=>{
+    const { w, h }=desktopSize();
+    setIconPos((prev)=>{
+      const next:Record<string,{x:number,y:number}>={};
+      Object.entries(prev).forEach(([k,p])=>{ next[k]=snapPos(p.x,p.y,w,h-30); });
+      try{ localStorage.setItem("wenge_icon_pos", JSON.stringify(next)); }catch{}
+      return next;
+    });
+  };
+
+  // Refresh: 再起動せず、保存済みアイコン位置を再読み込み + VFS実体ファイルを再読込する
+  const refreshDesktop=()=>{
+    // 1. 保存済みアイコン位置 (wenge_icon_pos) を再読み込み
+    try{
+      const saved=localStorage.getItem("wenge_icon_pos");
+      if(saved){
+        const p=JSON.parse(saved);
+        if(p && typeof p==="object"){
+          const stored=p as Record<string,{x:number;y:number}>;
+          setIconPos(()=>{
+            const next:Record<string,{x:number,y:number}>={ ...stored };
+            const { w, h }=desktopSize();
+            const occupied={ ...next };
+            desktopIcons.forEach((ic)=>{
+              if(!next[ic.id]){
+                const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+                next[ic.id]=spot; occupied[ic.id]=spot;
+              }
+            });
+            desktopShortcuts.forEach((s)=>{
+              if(!next[s.key]){
+                const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+                next[s.key]=spot; occupied[s.key]=spot;
+              }
+            });
+            if(!next["run"]){
+              const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+              next["run"]=spot;
+            }
+            return next;
+          });
+        }
+      }
+    }catch{}
+    // 2. VFS内のデスクトップ実体ファイルを再読み込み (位置がなければ割り当て)
+    listDesktopDocs().then((docs)=>{
+      setDesktopDocs(docs);
+      setIconPos((prev)=>{
+        const next={...prev};
+        let changed=false;
+        const { w, h }=desktopSize();
+        const occupied={...next};
+        docs.forEach((d)=>{
+          const k=docIconKey(d.id);
+          if(!next[k]){
+            const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+            next[k]=spot;
+            occupied[k]=spot;
+            changed=true;
+          }
+        });
+        return changed?next:prev;
+      });
+    }).catch(()=>{});
+    // 3. 開いているExplorer等のVFS表示にも再読込を通知
+    try{ window.dispatchEvent(new CustomEvent(VFS_CHANGED_EVENT)); }catch{}
+  };
+
+  // ExplorerからのHTML5 DnDが途中で終わっても move_hand カーソルが残らないよう保険で外す
+  useEffect(()=>{
+    const clear=()=>{ markWengeDragEnd(); cancelFileDragSession(); };
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    return ()=>{ window.removeEventListener("dragend", clear); window.removeEventListener("drop", clear); };
+  },[]);
 
   // VFS内のデスクトップ実体ファイルを読み込み、位置がなければ割り当て。
   // VFS変更イベントでも再読込するので、IE/Explorerからの保存が自動でアイコン化される。
@@ -884,26 +1141,77 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     const types=Array.from(e.dataTransfer.types || []);
     if(types.includes(R2_DRAG_MIME) || types.includes("Files")){ e.preventDefault(); e.dataTransfer.dropEffect="copy"; }
   };
-  const placeDocAt=(docId: string, clientX: number, clientY: number)=>{
-    const rect=desktopRef.current?.getBoundingClientRect();
+  const placeShortcutAt=(key: string, clientX: number, clientY: number)=>{
+    const v = toVirtual(clientX, clientY);
     const { w, h }=desktopSize();
-    const wantX=rect?clientX-rect.left-40:undefined;
-    const wantY=rect?clientY-rect.top-30:undefined;
+    const wantX=v.x-40;
+    const wantY=v.y-30;
+    setIconPos((prev)=>{
+      const spot=findSpotForNew(wantX,wantY,w,h,prev);
+      return {...prev,[key]:spot};
+    });
+  };
+  const placeDocAt=(docId: string, clientX: number, clientY: number)=>{
+    const v = toVirtual(clientX, clientY);
+    const { w, h }=desktopSize();
+    const wantX=v.x-40;
+    const wantY=v.y-30;
     setIconPos((prev)=>{
       const spot=findSpotForNew(wantX,wantY,w,h,prev);
       return {...prev,[docIconKey(docId)]:spot};
     });
   };
-  const handleDesktopDrop=async (e: React.DragEvent)=>{
-    const raw=e.dataTransfer.getData(R2_DRAG_MIME);
-    if(!raw) return; // OSファイルの直接ドロップはExplorer(R2ビュー)側で扱う
-    e.preventDefault();
-    e.stopPropagation();
-    let item: R2DragItem;
-    try{ item=JSON.parse(raw) as R2DragItem; }catch{ return; }
-    setDocDropBusy("Copying...");
+  // Pointer DnD用: ペイロードをデスクトップへ配置 (Win準拠: 無修飾=移動 / Ctrl=コピー / Alt=ショートカット)
+  // VFS実体 (Documents/Downloads/Desktop相互) は無修飾で移動、システム仮想・R2は従来どおり。
+  const dropWengeFileToDesktop=async (item: R2DragItem, clientX: number, clientY: number, action: WengeDropAction = "move")=>{
+    setDocDropBusy(action === "copy" ? "Copying..." : action === "shortcut" ? "Creating shortcut..." : "Moving...");
     try{
-      if(item.kind==="file"){
+      if(item.kind==="shortcut"){
+        // 実体のないエントリはショートカットアイコンとして配置する (修飾キーによらず)
+        const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+        const iconSrc=item.iconSrc ?? (item.explorerPath ? ICONS.folderClosed : ICONS.fileWindows);
+        setDesktopShortcuts((prev)=>[...prev, { key, label: item.label, iconSrc, appId: item.appId, explorerPath: item.explorerPath, vfsId: item.vfsId }]);
+        placeShortcutAt(key,clientX,clientY);
+        playRestore();
+        return;
+      }
+      if(item.kind==="vfs-file"){
+        // Explorer(VFS表示)からのドラッグ。実体はIndexedDBにある。
+        // すでにDesktopにあるものは複製せずドロップ位置へ移動するだけ。
+        const src=await getVfsFile(item.id);
+        if(!src) throw new Error("Source file not found.");
+        if(normalizeVfsDir(src.dir)===normalizeVfsDir(VFS_DESKTOP)){
+          placeDocAt(src.id,clientX,clientY);
+          playRestore();
+          return;
+        }
+        if(action==="shortcut"){
+          // Alt+ドロップ: 実体を作らず参照ショートカットを作成 (元ファイルは残る)
+          const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+          const isImg=/\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(src.name) || src.mime.startsWith("image/");
+          const isMedia=/\.(mp3|wav|ogg|m4a|mp4|webm)$/i.test(src.name) || src.mime.startsWith("audio/") || src.mime.startsWith("video/");
+          const iconSrc=(isImg?ICONS.paint:isMedia?ICONS.mediaPlayer:(src.mime.startsWith("text/")||/\.(txt|md|json|js|css|html)$/i.test(src.name))?ICONS.notepad:ICONS.fileWindows);
+          setDesktopShortcuts((prev)=>[...prev, { key, label: src.name, iconSrc, vfsId: src.id }]);
+          placeShortcutAt(key,clientX,clientY);
+          playRestore();
+          return;
+        }
+        if(action==="copy"){
+          const doc=await saveDocFromBlob({ name: src.name, mime: src.mime || item.mime || guessMime(src.name), blob: src.blob, sourceR2Key: src.sourceR2Key });
+          setDesktopDocs((prev)=>[doc,...prev]);
+          placeDocAt(doc.id,clientX,clientY);
+          playRestore();
+          return;
+        }
+        // 無修飾 = 移動: C:/Desktop へ move し元フォルダから消す
+        const moved=await moveVfsFile(item.id, VFS_DESKTOP);
+        setDesktopDocs((prev)=>{
+          const doc={ id: moved.id, name: moved.name, mime: moved.mime, size: moved.size, createdAt: moved.createdAt, updatedAt: moved.updatedAt, sourceR2Key: moved.sourceR2Key, sourceUrl: moved.sourceUrl, blob: moved.blob };
+          return prev.some((d)=>d.id===doc.id) ? prev.map((d)=>d.id===doc.id?doc:d) : [doc,...prev];
+        });
+        placeDocAt(moved.id,clientX,clientY);
+        playRestore();
+      }else if(item.kind==="file"){
         const res=await fetch(item.url);
         if(!res.ok) throw new Error(`download failed: ${res.status}`);
         const blob=await res.blob();
@@ -912,7 +1220,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         const sourceR2Key = item.key.startsWith("downloads/") ? undefined : item.key;
         const doc=await saveDocFromBlob({ name: item.name, mime: blob.type || item.mime || guessMime(item.name), blob, sourceR2Key });
         setDesktopDocs((prev)=>[doc,...prev]);
-        placeDocAt(doc.id,e.clientX,e.clientY);
+        placeDocAt(doc.id,clientX,clientY);
         playRestore();
       }else{
         const files=await listR2Flat(item.prefix);
@@ -931,7 +1239,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             const blob=await res.blob();
             const doc=await saveDocFromBlob({ name, mime: blob.type || guessMime(name), blob, sourceR2Key: f.key });
             setDesktopDocs((prev)=>[doc,...prev]);
-            if(first){ placeDocAt(doc.id,e.clientX,e.clientY); first=false; }
+            if(first){ placeDocAt(doc.id,clientX,clientY); first=false; }
             else{
               setIconPos((prev)=>{
                 const { w, h }=desktopSize();
@@ -945,7 +1253,48 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       }
     }catch(err:any){
       playError();
-      showError("Desktop","Copy failed.\n"+(err?.message || "Could not download from R2."));
+      const label = action==="shortcut" ? "Could not create shortcut." : action==="copy" ? "Copy failed.\n" : "Move failed.\n";
+      showError("Desktop",label+(err?.message || "Could not download from R2."));
+    }finally{
+      setDocDropBusy(null);
+    }
+  };
+  // 最新のドロップ処理を登録用に保持する
+  const desktopFileDropRef=useRef(dropWengeFileToDesktop);
+  desktopFileDropRef.current=dropWengeFileToDesktop;
+  useEffect(()=>{
+    // boot/login時はDesktop要素自体が未マウントのため、desktopフェーズで登録し直す
+    if(phase!=="desktop") return;
+    const el=desktopRef.current;
+    if(!el) return;
+    const cleanupSession=initPointerDragCleanup();
+    const unregister=registerWengeDrop(el, { onDrop:(payload,pos,action)=>{ desktopFileDropRef.current(payload,pos.clientX,pos.clientY,action ?? "move"); } });
+    return ()=>{ unregister(); cleanupSession(); };
+  },[phase]);
+  // Explorer の右クリック「ショートカット作成/Desktopへコピー・移動」を受け取って、
+  // デスクトップのドロップ処理(実体複製/ショートカット配置)へそのまま委譲する。
+  useEffect(()=>{
+    return onSendToDesktop((payload)=>{
+      void desktopFileDropRef.current(payload.item, payload.clientX, payload.clientY, payload.action ?? "move");
+    });
+  },[]);
+  // ネイティブDnDはOS外からの実ファイル受け入れ専用に残す。
+  // (内部移動はPointer DnD、OSカーソルが出るのは外部ドロップ時のみ)
+  const handleDesktopDrop=async (e: React.DragEvent)=>{
+    if(!e.dataTransfer.files || e.dataTransfer.files.length===0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDocDropBusy("Copying...");
+    try{
+      for(const f of Array.from(e.dataTransfer.files)){
+        const doc=await saveDocFromBlob({ name: f.name, mime: f.type || guessMime(f.name), blob: f });
+        setDesktopDocs((prev)=>[doc,...prev]);
+        placeDocAt(doc.id,e.clientX,e.clientY);
+      }
+      playRestore();
+    }catch(err:any){
+      playError();
+      showError("Desktop","Copy failed.\n"+(err?.message || "Could not copy files."));
     }finally{
       setDocDropBusy(null);
     }
@@ -960,8 +1309,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
 
   useEffect(() => {
     const clampWindows = () => {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
+      const vw = viewW;
+      const vh = viewH;
       const taskbarH = 30;
       setWindows((prev) =>
         prev.map((w) => {
@@ -980,7 +1329,23 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     window.addEventListener("resize", clampWindows);
     clampWindows();
     return () => window.removeEventListener("resize", clampWindows);
-  }, []);
+  }, [viewW, viewH]);
+
+  // 解像度・UIスケール切替時はみ出したアイコンも画面内に収める
+  useEffect(() => {
+    setIconPos((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      const n = { ...prev };
+      let changed = false;
+      for (const k of Object.keys(n)) {
+        const p = n[k];
+        const nx = Math.max(0, Math.min(p.x, Math.max(0, viewW - ICON_W - 4)));
+        const ny = Math.max(0, Math.min(p.y, Math.max(0, viewH - 30 - ICON_H - 4)));
+        if (nx !== p.x || ny !== p.y) { n[k] = { x: nx, y: ny }; changed = true; }
+      }
+      return changed ? n : prev;
+    });
+  }, [viewW, viewH]);
 
   const focusedId = useMemo(() => {
     const open = windows.filter((w) => w.isOpen && !w.isMinimized);
@@ -999,8 +1364,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       }
       maxZ.current += 1;
       const def = APP_DEFS[id];
-      const vw = typeof window !== "undefined" ? window.innerWidth : 1024;
-      const vh = typeof window !== "undefined" ? window.innerHeight : 768;
+      const vw = viewW;
+      const vh = viewH;
       const cw = Math.min(def.w, vw - 16);
       const ch = Math.min(def.h, vh - 30 - 16);
       const cx = Math.max(4, Math.min(60 + Math.random() * 80, vw - cw - 4));
@@ -1038,7 +1403,36 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     openWindow(appId, { silent: true });
   };
 
+  // ショートカットアイコンのダブルクリックで開く
+  const openDesktopShortcut = async (sc: DesktopShortcut) => {
+    if (sc.appId && (APP_DEFS as Record<string, any>)[sc.appId]) {
+      openWindow(sc.appId as AppId, { silent: true });
+      return;
+    }
+    if (sc.vfsId) {
+      // Alt+ドロップで作ったVFS参照: 元ファイルを開く (元が消えていたら通知)
+      try {
+        const f = await getVfsFile(sc.vfsId);
+        if (!f) { showInfo("Shortcut", `${sc.label}\nThe original file could not be found.\nIt may have been moved or deleted.`); return; }
+        const doc: DesktopDoc = { id: f.id, name: f.name, mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.updatedAt, sourceR2Key: f.sourceR2Key, sourceUrl: f.sourceUrl, blob: f.blob };
+        openVfsDoc(doc);
+        return;
+      } catch (e: any) {
+        showError("Shortcut", e?.message || "Could not open the original file.");
+        return;
+      }
+    }
+    if (sc.explorerPath) {
+      setExplorerInitPath(sc.explorerPath);
+      setExplorerOpenKey((k) => k + 1);
+      openWindow("explorer", { silent: true });
+      return;
+    }
+    showInfo("Shortcut", `${sc.label}\nNo associated application.`);
+  };
+
   const closeWindow = (id: AppId) => {
+    if (id === "explorer") setExplorerInitPath(null);
     playDing();
     setWindows((p) => p.map((w) => (w.id === id ? { ...w, isOpen: false, isMinimized: false } : w)));
   };
@@ -1056,8 +1450,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
   const updatePos = (id: AppId, x: number, y: number) =>
     setWindows((p) => p.map((w) => {
       if (w.id !== id) return w;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
+      const vw = viewW;
+      const vh = viewH;
       const maxX = Math.max(0, vw - w.w - 4);
       const maxY = Math.max(0, vh - 30 - w.h - 4);
       return { ...w, x: Math.min(Math.max(0, x), maxX), y: Math.min(Math.max(0, y), maxY) };
@@ -1066,26 +1460,128 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
   const updateSize = (id: AppId, nw: number, nh: number) =>
     setWindows((p) => p.map((win) => {
       if (win.id !== id) return win;
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
+      const vw = viewW;
+      const vh = viewH;
       const cw = Math.min(nw, vw - win.x - 4);
       const ch = Math.min(nh, vh - 30 - win.y - 4);
       return { ...win, w: cw, h: ch };
     }));
 
-  // Icon drag handlers
-  const handleIconPointerDown = (e: React.MouseEvent | React.TouchEvent, id: AppId) => {
-    const isTouch = "touches" in e;
-    const clientX = isTouch ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
-    const clientY = isTouch ? (e as React.TouchEvent).touches[0].clientY : (e as React.MouseEvent).clientY;
+  // Icon drag handlers (Pointer Eventsベースの自作ドラッグ。
+  // ネイティブDnDを使わないためカスタムカーソルが維持される)
+  // デスクトップVFS実体アイコンは: 近距離ドラッグ=既存のアイコン移動 / ウィンドウ上への遠距離ドラッグ=ファイルDnDセッション (Explorer等へ移動/コピー可能)
+  const desktopFileDragRef = useRef<{ id: string; pid: number; startX: number; startY: number; off: () => void } | null>(null);
+  const cancelDesktopFileDragListeners = () => {
+    try { desktopFileDragRef.current?.off(); } catch {}
+    desktopFileDragRef.current = null;
+  };
+  useEffect(() => () => { cancelDesktopFileDragListeners(); }, []);
+  const iconForDesktopDoc = (doc: DesktopDoc): string => {
+    const label = doc.name.split("/").pop() || doc.name;
+    const isImg = /\.(png|jpe?g|gif|bmp|webp|svg)$/i.test(label) || doc.mime.startsWith("image/");
+    const isMedia = /\.(mp3|wav|ogg|m4a|mp4|webm)$/i.test(label) || doc.mime.startsWith("audio/") || doc.mime.startsWith("video/");
+    return isImg ? ICONS.paint : isMedia ? ICONS.mediaPlayer : (doc.mime.startsWith("text/") || /\.(txt|md|json|js|css|html)$/i.test(label)) ? ICONS.notepad : ICONS.fileWindows;
+  };
+  const isOverExplorerWindowAt = (clientX: number, clientY: number): boolean => {
+    let el: Element | null = null;
+    try { el = document.elementFromPoint(clientX, clientY); } catch { return false; }
+    while (el) {
+      if (el instanceof HTMLElement) {
+        const wid = el.getAttribute?.("data-window-id");
+        if (wid === "explorer") return true;
+        // Explorerウィンドウ内のドロップ先 (一覧ペイン/左ナビ) を直接踏んでいれば即対象
+        if (el.hasAttribute?.("data-wenge-drop") && /explorer/.test(el.getAttribute("data-wenge-drop") || "")) return true;
+      }
+      el = el.parentElement;
+    }
+    return false;
+  };
+  const onDesktopDocIconPointerDown = (e: React.PointerEvent, doc: DesktopDoc, iconId: AppId) => {
+    // まず既存のアイコン移動/選択ハンドラを通す (近距離ドラッグ・クリック・ごみ箱DnDは従来どおり)
+    handleIconPointerDown(e, iconId);
+    if (e.pointerType === "touch") return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    cancelDesktopFileDragListeners();
+    const startX = e.clientX, startY = e.clientY, pid = e.pointerId, docId = doc.id;
+    const payload: R2DragItem = { kind: "vfs-file", id: docId, name: doc.name, mime: doc.mime, size: doc.size };
+    const ghostIcon = iconForDesktopDoc(doc);
+    const label = doc.name.split("/").pop() || doc.name;
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid || !desktopFileDragRef.current) return;
+      const mod = { ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey };
+      const dist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+      if (!isFileDragging()) {
+        // Explorerウィンドウ上に十分運んだらファイルDnDセッションへ昇格 (アイコン移動側は据え置き)
+        if (dist <= DRAG_THRESHOLD_PX || !isOverExplorerWindowAt(ev.clientX, ev.clientY)) return;
+        setDragging((prev) => {
+          if (!prev) return prev;
+          // アイコンがゴーストに吸着しないよう開始位置へ戻す
+          const orig = multiDrag?.[iconId as string] ?? iconPos[iconId as string];
+          if (orig && prev.id === iconId) {
+            setIconPos((pp) => ({ ...pp, [iconId as string]: orig }));
+          }
+          return { ...prev, hasMoved: false };
+        });
+        setHoverPos(null);
+        beginFileDragSession(payload, createFileDragGhost(label, ghostIcon), ev.clientX, ev.clientY, mod);
+      } else {
+        moveFileDragSession(ev.clientX, ev.clientY, mod);
+      }
+    };
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      cancelDesktopFileDragListeners();
+      if (isFileDragging()) {
+        // Explorerへ落ちれば移動/コピー実行。デスクトップ上なら何もせず (アイコン移動側が配置を担う)
+        const dropped = finishFileDragSession(ev.clientX, ev.clientY, { ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey });
+        if (dropped) {
+          // ファイルDnDが処理した場合はアイコン移動の後処理を抑止
+          setDragging(null);
+          setMultiDrag(null);
+          setHoverPos(null);
+          suppressDesktopClick.current = true;
+        }
+      }
+    };
+    const cancel = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      cancelDesktopFileDragListeners();
+      cancelFileDragSession();
+    };
+    const off = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    desktopFileDragRef.current = { id: docId, pid, startX, startY, off };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  };
+  const ensureDesktopCapture = (e: React.PointerEvent) => {
+    try {
+      const el = desktopRef.current;
+      if (el && !el.hasPointerCapture?.(e.pointerId)) el.setPointerCapture(e.pointerId);
+    } catch {}
+  };
+  const releaseDesktopCapture = (e: React.PointerEvent) => {
+    try {
+      const el = desktopRef.current;
+      if (el && el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+  const handleIconPointerDown = (e: React.PointerEvent, id: AppId) => {
+    const isTouch = e.pointerType === "touch";
+    const clientX = e.clientX;
+    const clientY = e.clientY;
     const pos = iconPos[id] || {x:0,y:0};
-    const rect = desktopRef.current?.getBoundingClientRect();
-    const offsetX = clientX - (rect?rect.left:0) - pos.x;
-    const offsetY = clientY - (rect?rect.top:0) - pos.y;
+    const v = toVirtual(clientX, clientY);
+    const offsetX = v.x - pos.x;
+    const offsetY = v.y - pos.y;
 
     // Selection logic
     const isSelected = selectedIds.has(id);
-    const isMulti = isTouch ? false : ((e as React.MouseEvent).ctrlKey || (e as React.MouseEvent).metaKey);
+    const isMulti = !isTouch && (e.ctrlKey || e.metaKey);
     if(!isMulti && !isSelected){
       setSelectedIds(new Set([id]));
     } else if(isMulti){
@@ -1098,9 +1594,11 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     // playChord();
 
     if(isTouch){
-      // long press required
+      // long press required (発火時にキャプチャして追跡を継続)
+      touchPidRef.current = e.pointerId;
       if(longPressTimer.current) window.clearTimeout(longPressTimer.current);
       longPressTimer.current = window.setTimeout(()=>{
+        try { desktopRef.current?.setPointerCapture(touchPidRef.current as number); } catch {}
         setDragging({id, offsetX, offsetY, startX: clientX, startY: clientY, hasMoved:false});
         if(selectedIds.has(id)){
           const md:Record<string,{x:number,y:number}>={};
@@ -1111,6 +1609,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           setMultiDrag({[id]:{...pos}});
         }
       }, 400) as any;
+      e.stopPropagation();
       return;
     }
 
@@ -1127,20 +1626,23 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     e.stopPropagation();
   };
 
-  const handleStartMenuItemPointerDown = (e: React.MouseEvent, id: AppId, label: string, iconSrc: string) => {
+  const handleStartMenuItemPointerDown = (e: React.PointerEvent, id: AppId, label: string, iconSrc: string) => {
     e.preventDefault();
     e.stopPropagation();
-    const clientX = e.clientX;
-    const clientY = e.clientY;
+    const v = toVirtual(e.clientX, e.clientY);
     setStartOpen(false);
     setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
-    // つかんでいるアイコンがカーソルの真ん中に来るようオフセットを取る
-    setDraggingFromStart({id, label, iconSrc, x: clientX, y: clientY, dx: 40, dy: 30});
-    setDragging({id, offsetX: 40, offsetY: 30, startX: clientX, startY: clientY, hasMoved:false});
+    // つかんでいるアイコンがカーソルの真ん中に来るようオフセットを取る (仮想論理pxで保持)
+    setDraggingFromStart({id, label, iconSrc, x: v.x, y: v.y, dx: 40, dy: 30});
+    setDragging({id, offsetX: 40, offsetY: 30, startX: e.clientX, startY: e.clientY, hasMoved:false});
   };
 
-  const handleDesktopMouseDown = (e: React.MouseEvent) => {
+  const handleDesktopPointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement;
+    // コンテキストメニュー内の操作はメニューに任せる。
+    // ここで setContextMenu(null) すると pointerdown 時点でメニューが
+    // アンマウントされ、後続の click が MenuListItem に届かなくなる。
+    if(target.closest("[data-context-menu]")) return;
     if(target.closest("[data-icon]")) return;
     if(target.closest("[data-start-menu]")) return;
     if(target.closest("[data-taskbar]")){
@@ -1154,7 +1656,9 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       return;
     }
     // Window上での操作はアイコン選択をクリアするだけで範囲選択は開始しない
-    if(target.closest("[data-window]") || target.closest("[data-context-menu]")){
+    // (モーダルダイアログ・BSOD上も同様。背景ハンドラがキャプチャを奪うと
+    //  OKボタン等のclickが届かなくなるため、ここで早期リターンする)
+    if(target.closest("[data-window]") || target.closest("[data-context-menu]") || target.closest("[data-system-dialog]") || target.closest("[data-bsod]")){
       setSelectedIds(new Set());
       setContextMenu(null);
       setStartOpen(false);
@@ -1165,34 +1669,42 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     setStartOpen(false);
     setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false);
     setContextMenu(null);
-    if(e.button!==0) return;
-    const rect=desktopRef.current?.getBoundingClientRect();
-    if(!rect) return;
-    const x0=e.clientX - rect.left;
-    const y0=e.clientY - rect.top;
-    setSelectionRect({x0,y0,x1:x0,y1:y0});
+    if((e.pointerType === "mouse" || e.pointerType === "pen") && e.button!==0) return;
+    // 背景上での操作はキャプチャして追跡を継続 (クリック/ダブルクリックには影響しない)
+    ensureDesktopCapture(e);
+    const v=toVirtual(e.clientX, e.clientY);
+    setSelectionRect({x0:v.x,y0:v.y,x1:v.x,y1:v.y});
   };
 
-  const handleDesktopMouseMove = (e: React.MouseEvent) => {
-    setHoverPos({x:e.clientX,y:e.clientY});
-    // スタートメニューからのドラッグゴーストを追従
+  const handleDesktopPointerMove = (e: React.PointerEvent) => {
+    // ファイルDnDセッション中はアイコン移動側を動かさない (Explorer等へのドロップ用ゴーストが主役)
+    if (isFileDragging()) {
+      return;
+    }
+    const v = toVirtual(e.clientX, e.clientY);
+    setHoverPos({x:v.x,y:v.y});
+    // スタートメニューからのドラッグゴーストを追従 (仮想論理pxで保持)
     if(draggingFromStart){
-      setDraggingFromStart(prev=> prev?{...prev, x: e.clientX, y: e.clientY}:prev);
+      setDraggingFromStart(prev=> prev?{...prev, x: v.x, y: v.y}:prev);
       if(dragging){
         const dx=e.clientX - dragging.startX;
         const dy=e.clientY - dragging.startY;
         if(Math.abs(dx)>3 || Math.abs(dy)>3) dragging.hasMoved=true;
+        if(dragging.hasMoved) { ensureDesktopCapture(e); markWengeDragStart(); }
       }
       return;
     }
     if(dragging){
       const rect=desktopRef.current?.getBoundingClientRect();
       if(!rect) return;
+      // 論理px換算 (transform scale下ではrectが画面pxを返す)
+      const rw = rect.width / viewScale, rh = rect.height / viewScale;
       const dx=e.clientX - dragging.startX;
       const dy=e.clientY - dragging.startY;
       if(Math.abs(dx)>3 || Math.abs(dy)>3) dragging.hasMoved=true;
-      const baseX = e.clientX - rect.left - dragging.offsetX;
-      const baseY = e.clientY - rect.top - dragging.offsetY;
+      if(dragging.hasMoved) { ensureDesktopCapture(e); markWengeDragStart(); }
+      const baseX = (e.clientX - rect.left) / viewScale - dragging.offsetX;
+      const baseY = (e.clientY - rect.top) / viewScale - dragging.offsetY;
       const deltaX = baseX - (multiDrag?.[dragging.id]?.x ?? iconPos[dragging.id]?.x ?? 0);
       const deltaY = baseY - (multiDrag?.[dragging.id]?.y ?? iconPos[dragging.id]?.y ?? 0);
       setIconPos(prev=>{
@@ -1203,14 +1715,14 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             let nx=orig.x + deltaX;
             let ny=orig.y + deltaY;
             // clamp
-            nx=Math.max(0, Math.min(nx, rect.width - ICON_W));
-            ny=Math.max(0, Math.min(ny, rect.height - ICON_H));
+            nx=Math.max(0, Math.min(nx, rw - ICON_W));
+            ny=Math.max(0, Math.min(ny, rh - ICON_H));
             // snap to grid (origin 12 to match getDefaultPos)
             nx=Math.round((nx - 12)/GRID_W)*GRID_W + 12;
             ny=Math.round((ny - 12)/GRID_H)*GRID_H + 12;
             // second clamp after snap
-            nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
-            ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
+            nx=Math.max(12, Math.min(nx, rw - ICON_W -12));
+            ny=Math.max(12, Math.min(ny, rh - ICON_H -12));
             // collision detection: check if this position overlaps with any other icon
             const otherIcons = Object.keys(n).filter(id => id !== k);
             for (const otherId of otherIcons) {
@@ -1224,7 +1736,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                       if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
                       const tryX = nx + dx * GRID_W;
                       const tryY = ny + dy * GRID_H;
-                      if (tryX < 12 || tryY < 12 || tryX > rect.width - ICON_W - 12 || tryY > rect.height - ICON_H - 12) continue;
+                      if (tryX < 12 || tryY < 12 || tryX > rw - ICON_W - 12 || tryY > rh - ICON_H - 12) continue;
                       let collision = false;
                       for (const checkId of otherIcons) {
                         const checkPos = n[checkId];
@@ -1256,11 +1768,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       });
     }
     if(selectionRect){
-      const rect=desktopRef.current?.getBoundingClientRect();
-      if(!rect) return;
-      const x1=e.clientX - rect.left;
-      const y1=e.clientY - rect.top;
-      const newRect={...selectionRect, x1,y1};
+      const v1=toVirtual(e.clientX, e.clientY);
+      const newRect={...selectionRect, x1:v1.x,y1:v1.y};
       setSelectionRect(newRect);
       // compute selection
       const left=Math.min(newRect.x0,newRect.x1), right=Math.max(newRect.x0,newRect.x1), top=Math.min(newRect.y0,newRect.y1), bottom=Math.max(newRect.y0,newRect.y1);
@@ -1285,8 +1794,15 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     ? (hoverPos ? isOverRecycleAt(hoverPos.x, hoverPos.y) : isOverRecycleAt(draggingFromStart.x, draggingFromStart.y))
     : !!(dragging && dragging.hasMoved && hoverPos && iconPos[dragging.id] && isOverRecycleAt(hoverPos.x, hoverPos.y));
 
-  const handleDesktopMouseUp = (e: React.MouseEvent) => {
+  const handleDesktopPointerUp = (e: React.PointerEvent) => {
+    markWengeDragEnd();
+    releaseDesktopCapture(e);
+    touchPidRef.current = null;
     if(longPressTimer.current){ clearTimeout(longPressTimer.current); longPressTimer.current=null; }
+    // キャプチャ中はup後のclickがコンテナに向くため、ドラッグ後は抑止する
+    if((dragging && dragging.hasMoved) || (draggingFromStart && dragging?.hasMoved)){
+      suppressDesktopClick.current=true;
+    }
     if(dragging && !dragging.hasMoved){
       // click without move already handled selection
     }
@@ -1295,15 +1811,16 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     if(draggingFromStart && dragging?.hasMoved){
       const rect=desktopRef.current?.getBoundingClientRect();
       // タスクバー帯（下端30px相当）を除外
-      const inDesktop=!!rect && e.clientX>=rect.left && e.clientX<=rect.right && e.clientY>=rect.top && e.clientY<=rect.bottom-30;
-      const overRecycle=isOverRecycleAt(e.clientX,e.clientY);
+      const inDesktop=!!rect && e.clientX>=rect.left && e.clientX<=rect.right && e.clientY>=rect.top && e.clientY<=rect.bottom-30*viewScale;
+      const v=toVirtual(e.clientX,e.clientY);
+      const overRecycle=isOverRecycleAt(v.x,v.y);
       const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
       const dropWin = dropTarget?.closest('[data-window-id]');
       const dropWinId = dropWin?.getAttribute('data-window-id');
       const onStartMenu = !!dropTarget?.closest('[data-start-menu]');
       if(inDesktop && !overRecycle && dropWinId!=='recycle' && !onStartMenu && rect){
         if(desktopIcons.some(ic=>ic.id===draggingFromStart.id)) playError();
-        else addToDesktop(draggingFromStart.id, { label:draggingFromStart.label, iconSrc:draggingFromStart.iconSrc, x:e.clientX-rect.left-40, y:e.clientY-rect.top-30 });
+        else addToDesktop(draggingFromStart.id, { label:draggingFromStart.label, iconSrc:draggingFromStart.iconSrc, x:v.x-40, y:v.y-30 });
       }
       setDraggingFromStart(null);
       setDragging(null);
@@ -1329,7 +1846,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       const dropTarget = document.elementFromPoint(e.clientX, e.clientY);
       const dropWin = dropTarget?.closest('[data-window-id]');
       const dropWinId = dropWin?.getAttribute('data-window-id');
-      if(dropWinId === 'recycle' || isOverRecycleAt(e.clientX, e.clientY)){
+      const vd=toVirtual(e.clientX, e.clientY);
+      if(dropWinId === 'recycle' || isOverRecycleAt(vd.x, vd.y)){
         // ドラッグしたアイコン＋範囲選択されたアイコンをまとめて削除
         const ids=new Set<AppId>([dragging.id as AppId, ...selectedIds]);
         setDragging(null);
@@ -1351,113 +1869,204 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
     setSelectionRect(null);
   };
 
-  const handleTouchMove=(e: React.TouchEvent)=>{
-    if(dragging){
-      const rect=desktopRef.current?.getBoundingClientRect();
-      if(!rect) return;
-      const t=e.touches[0];
-      const baseX=t.clientX - rect.left - dragging.offsetX;
-      const baseY=t.clientY - rect.top - dragging.offsetY;
-      const deltaX = baseX - (multiDrag?.[dragging.id]?.x ?? 0);
-      const deltaY = baseY - (multiDrag?.[dragging.id]?.y ?? 0);
-      setIconPos(prev=>{
-        const n={...prev};
-        if(multiDrag){
-          Object.keys(multiDrag).forEach(k=>{
-            const orig=multiDrag[k];
-            let nx=orig.x + deltaX;
-            let ny=orig.y + deltaY;
-            nx=Math.max(0, Math.min(nx, rect.width - ICON_W));
-            ny=Math.max(0, Math.min(ny, rect.height - ICON_H));
-            nx=Math.round((nx - 12)/GRID_W)*GRID_W + 12;
-            ny=Math.round((ny - 12)/GRID_H)*GRID_H + 12;
-            nx=Math.max(12, Math.min(nx, rect.width - ICON_W -12));
-            ny=Math.max(12, Math.min(ny, rect.height - ICON_H -12));
-            // collision detection: check if this position overlaps with any other icon
-            const otherIcons = Object.keys(n).filter(id => id !== k);
-            for (const otherId of otherIcons) {
-              const otherPos = n[otherId];
-              if (otherPos && Math.abs(otherPos.x - nx) < ICON_W && Math.abs(otherPos.y - ny) < ICON_H) {
-                // Find nearest available grid position
-                let found = false;
-                for (let radius = 1; radius <= 5 && !found; radius++) {
-                  for (let dx = -radius; dx <= radius && !found; dx++) {
-                    for (let dy = -radius; dy <= radius && !found; dy++) {
-                      if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
-                      const tryX = nx + dx * GRID_W;
-                      const tryY = ny + dy * GRID_H;
-                      if (tryX < 12 || tryY < 12 || tryX > rect.width - ICON_W - 12 || tryY > rect.height - ICON_H - 12) continue;
-                      let collision = false;
-                      for (const checkId of otherIcons) {
-                        const checkPos = n[checkId];
-                        if (checkPos && Math.abs(checkPos.x - tryX) < ICON_W && Math.abs(checkPos.y - tryY) < ICON_H) {
-                          collision = true;
-                          break;
-                        }
-                      }
-                      if (!collision) {
-                        nx = tryX;
-                        ny = tryY;
-                        found = true;
-                      }
-                    }
-                  }
-                }
-                if (!found) {
-                  nx = orig.x;
-                  ny = orig.y;
-                }
-                break;
-              }
-            }
-            n[k]={x:nx,y:ny};
-          });
-        }
-        return n;
-      });
-      e.preventDefault();
-    }
-  };
-  const handleTouchEnd=(e: React.TouchEvent)=>{
-    if(longPressTimer.current){ clearTimeout(longPressTimer.current); longPressTimer.current=null; }
-
-    const touch = e.changedTouches[0];
-    if(draggingFromStart && dragging?.hasMoved){
-      const rect=desktopRef.current?.getBoundingClientRect();
-      const inDesktop=!!rect && touch.clientX>=rect.left && touch.clientX<=rect.right && touch.clientY>=rect.top && touch.clientY<=rect.bottom;
-      if(inDesktop && !isOverRecycleAt(touch.clientX,touch.clientY) && rect){
-        addToDesktop(draggingFromStart.id,{label:draggingFromStart.label,iconSrc:draggingFromStart.iconSrc,x:touch.clientX-rect.left-40,y:touch.clientY-rect.top-30});
-      }
-      setDraggingFromStart(null);
-      setDragging(null); setMultiDrag(null);
-      return;
-    }
-    if(draggingFromStart){
-      const id=draggingFromStart.id;
-      setDraggingFromStart(null);
-      setDragging(null); setMultiDrag(null);
-      openWindow(id,{silent:true});
-      return;
-    }
-    if(dragging && dragging.hasMoved && isOverRecycleAt(touch.clientX,touch.clientY)){
-      const id=dragging.id;
-      setDragging(null); setMultiDrag(null);
-      removeFromDesktop(id as AppId);
-      return;
-    }
-    
-    setDragging(null); setMultiDrag(null);
-  };
-
   const handleDesktopContextMenu=(e: React.MouseEvent)=>{
     const target = e.target as HTMLElement;
     // Window内(IE含む)は各窓に任せ、デスクトップメニューを出さない
     if(target.closest("[data-window]") || target.closest("[data-context-menu]")){ e.preventDefault(); return; }
     e.preventDefault();
-    setContextMenu({x:e.clientX, y:e.clientY});
+    const v=toVirtual(e.clientX, e.clientY);
+    // アイコン上の右クリック → Win95風アイコンメニュー
+    const iconEl = target.closest("[data-icon-id]") as HTMLElement | null;
+    if(iconEl){
+      const iconId = iconEl.getAttribute("data-icon-id") || "";
+      let ctxTarget: IconCtxTarget | undefined;
+      if(iconId === "run"){
+        ctxTarget = { kind: "run" };
+        setSelectedIds(new Set(["run" as AppId]));
+      } else if(isDocIconKey(iconId)){
+        const docId = docIdFromKey(iconId);
+        const doc = desktopDocs.find((d)=> d.id===docId);
+        const label = doc ? (doc.name.split("/").pop() || doc.name) : docId;
+        ctxTarget = { kind: "doc", key: iconId, docId, label };
+        if(!selectedIds.has(iconId as AppId)) setSelectedIds(new Set([iconId as AppId]));
+      } else if(iconId.startsWith("shortcut:")){
+        const sc = desktopShortcuts.find((s)=> s.key===iconId);
+        ctxTarget = { kind: "shortcut", key: iconId, label: sc?.label ?? iconId };
+        if(!selectedIds.has(iconId as AppId)) setSelectedIds(new Set([iconId as AppId]));
+      } else if((APP_DEFS as Record<string,any>)[iconId]){
+        const ic = desktopIcons.find((c)=> c.id===iconId);
+        const def = (APP_DEFS as Record<string,any>)[iconId];
+        ctxTarget = { kind: "app", id: iconId as AppId, label: ic?.label ?? def.title };
+        if(!selectedIds.has(iconId as AppId)) setSelectedIds(new Set([iconId as AppId]));
+      }
+      if(ctxTarget){
+        setContextMenu({x:v.x, y:v.y, target: ctxTarget});
+        return;
+      }
+    }
+    setContextMenu({x:v.x, y:v.y});
   };
 
-  // Programsメニュー1行分 (APP_DEFSから動的生成)。メニュー確定後は閉じる。
+  // --- Win95風アイコンメニューのアクション群 ---
+  const openCtxTarget=(t: IconCtxTarget)=>{
+    if(t.kind==="app"){ openWindow(t.id, { silent: true }); return; }
+    if(t.kind==="doc"){
+      const doc=desktopDocs.find((d)=> d.id===t.docId);
+      if(doc) openVfsDoc(doc);
+      else showError("Open", `Cannot find '${t.label}'.\nThe file may have been moved or deleted.`);
+      return;
+    }
+    if(t.kind==="shortcut"){
+      const sc=desktopShortcuts.find((s)=> s.key===t.key);
+      if(sc) void openDesktopShortcut(sc);
+      else showError("Open", `Cannot find shortcut '${t.label}'.`);
+      return;
+    }
+    openWindow("run", { silent: true });
+  };
+  const exploreCtxTarget=(t: IconCtxTarget)=>{
+    // Win95の Explore = Explorerで場所を開く。Wengeの仮想FS上の対応パスへ誘導する。
+    if(t.kind==="doc"){ setExplorerInitPath("C:\\Desktop"); }
+    else if(t.kind==="shortcut"){
+      const sc=desktopShortcuts.find((s)=> s.key===t.key);
+      if(sc?.explorerPath) setExplorerInitPath(sc.explorerPath);
+      else setExplorerInitPath("C:\\Desktop");
+    }
+    else { setExplorerInitPath(null); }
+    setExplorerOpenKey((k)=> k+1);
+    openWindow("explorer", { silent: true });
+  };
+  const createShortcutOf=(t: IconCtxTarget)=>{
+    const { w, h }=desktopSize();
+    const occupied={ ...iconPos };
+    const spot=findSpotForNew(undefined,undefined,w,h,occupied);
+    const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+    if(t.kind==="app"){
+      const def=(APP_DEFS as Record<string,any>)[t.id];
+      setDesktopShortcuts((prev)=>[...prev,{ key, label: `${t.label} Shortcut`, iconSrc: def.iconSrc, appId: t.id }]);
+    } else if(t.kind==="doc"){
+      const doc=desktopDocs.find((d)=> d.id===t.docId);
+      const label=doc ? (doc.name.split("/").pop() || doc.name) : t.label;
+      const ll=label.toLowerCase();
+      const iconSrc=/\.(png|jpe?g|gif|bmp|webp|svg)$/.test(ll)?ICONS.paint:/\.(mp3|wav|ogg|m4a|mp4|webm)$/.test(ll)?ICONS.mediaPlayer:/\.(txt|md|json|js|css|html)$/.test(ll)?ICONS.notepad:ICONS.fileWindows;
+      setDesktopShortcuts((prev)=>[...prev,{ key, label: `Shortcut to ${label}`, iconSrc, vfsId: t.docId }]);
+    } else if(t.kind==="shortcut"){
+      const sc=desktopShortcuts.find((s)=> s.key===t.key);
+      if(!sc) return;
+      setDesktopShortcuts((prev)=>[...prev,{ key, label: sc.label, iconSrc: sc.iconSrc, appId: sc.appId, explorerPath: sc.explorerPath, vfsId: sc.vfsId }]);
+    } else {
+      return;
+    }
+    setIconPos((prev)=>({ ...prev, [key]: spot }));
+  };
+  const deleteCtxTarget=async (t: IconCtxTarget)=>{
+    if(t.kind==="run" || (t.kind==="app" && t.id==="recycle")){ playError(); return; }
+    const label = t.label;
+    const ok = await showConfirm("Confirm Delete", `Are you sure you want to delete '${label}'?\nThis cannot be undone.`, "Delete", "Cancel");
+    if(!ok) return;
+    if(t.kind==="app") removeFromDesktop(t.id);
+    else removeFromDesktop(t.key);
+  };
+  const startRename=(t: IconCtxTarget)=>{
+    if(t.kind==="run" || (t.kind==="app" && t.id==="recycle")){ playError(); return; }
+    const id = t.kind==="app" ? t.id : t.key;
+    setRenamingId(id);
+    setRenameValue(t.label);
+  };
+  const commitRename=async ()=>{
+    if(!renamingId) return;
+    const v=renameValue.trim();
+    const id=renamingId;
+    setRenamingId(null);
+    if(!v) return;
+    try{
+      if(isDocIconKey(id)){
+        const docId=docIdFromKey(id);
+        const renamed=await renameVfsFile(docId, v);
+        setDesktopDocs((prev)=> prev.map((d)=> d.id===docId ? { ...d, name: renamed.name, updatedAt: renamed.updatedAt } : d));
+      } else if(id.startsWith("shortcut:")){
+        setDesktopShortcuts((prev)=> prev.map((s)=> s.key===id ? { ...s, label: v } : s));
+      } else {
+        setDesktopIcons((prev)=> prev.map((ic)=> ic.id===id ? { ...ic, label: v } : ic));
+      }
+    }catch(e:any){
+      showError("Rename", e?.message || "Rename failed.");
+    }
+  };
+  const copyCtxTarget=(t: IconCtxTarget, op: "cut" | "copy")=>{
+    if(t.kind==="run" || (t.kind==="app" && t.id==="recycle")){ playError(); return; }
+    if(t.kind==="app"){
+      const def=(APP_DEFS as Record<string,any>)[t.id];
+      setFsClipboard({ op, kind: "app", id: t.id, label: t.label, iconSrc: def.iconSrc });
+    } else if(t.kind==="doc"){
+      const ll=t.label.toLowerCase();
+      const iconSrc=/\.(png|jpe?g|gif|bmp|webp|svg)$/.test(ll)?ICONS.paint:/\.(mp3|wav|ogg|m4a|mp4|webm)$/.test(ll)?ICONS.mediaPlayer:/\.(txt|md|json|js|css|html)$/.test(ll)?ICONS.notepad:ICONS.fileWindows;
+      setFsClipboard({ op, kind: "doc", id: t.docId, label: t.label, iconSrc });
+    } else if(t.kind==="shortcut"){
+      const sc=desktopShortcuts.find((s)=> s.key===t.key);
+      if(!sc) return;
+      setFsClipboard({ op, kind: "shortcut", id: t.key, label: sc.label, iconSrc: sc.iconSrc });
+    }
+  };
+  const pasteClipboardAt=async (at?: {x:number;y:number})=>{
+    if(!clipboard) return;
+    const { w, h }=desktopSize();
+    const occupied={ ...iconPos };
+    const spot= at ? findSpotForNew(at.x, at.y, w, h, occupied) : findSpotForNew(undefined,undefined,w,h,occupied);
+    const cb=clipboard;
+    if(cb.kind==="app"){
+      if(cb.op==="cut"){
+        setIconPos((prev)=>({ ...prev, [cb.id]: spot }));
+      } else {
+        const def=(APP_DEFS as Record<string,any>)[cb.id];
+        if(!def) return;
+        const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+        setDesktopShortcuts((prev)=>[...prev,{ key, label: cb.label, iconSrc: def.iconSrc, appId: cb.id }]);
+        setIconPos((prev)=>({ ...prev, [key]: spot }));
+      }
+    } else if(cb.kind==="shortcut"){
+      const sc=desktopShortcuts.find((s)=> s.key===cb.id);
+      if(!sc) return;
+      if(cb.op==="cut"){
+        setIconPos((prev)=>({ ...prev, [cb.id]: spot }));
+      } else {
+        const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+        setDesktopShortcuts((prev)=>[...prev,{ key, label: sc.label, iconSrc: sc.iconSrc, appId: sc.appId, explorerPath: sc.explorerPath, vfsId: sc.vfsId }]);
+        setIconPos((prev)=>({ ...prev, [key]: spot }));
+      }
+    } else if(cb.kind==="doc"){
+      try{
+        if(cb.op==="cut"){
+          setIconPos((prev)=>({ ...prev, [docIconKey(cb.id)]: spot }));
+        } else {
+          const copied=await copyVfsFile(cb.id, VFS_DESKTOP);
+          const doc={ id: copied.id, name: copied.name, mime: copied.mime, size: copied.size, createdAt: copied.createdAt, updatedAt: copied.updatedAt, sourceR2Key: copied.sourceR2Key, sourceUrl: copied.sourceUrl, blob: copied.blob };
+          setDesktopDocs((prev)=>[...prev, doc]);
+          setIconPos((prev)=>({ ...prev, [docIconKey(copied.id)]: spot }));
+        }
+      }catch(e:any){
+        showError("Paste", e?.message || "Paste failed.");
+        return;
+      }
+    }
+    if(cb.op==="cut") setFsClipboard(null);
+  };
+  const propertiesOf=(t: IconCtxTarget)=>{
+    if(t.kind==="app"){
+      const def=(APP_DEFS as Record<string,any>)[t.id];
+      showInfo(`${t.label} Properties`, `Type: Application\nTitle: ${def.title}\nLocation: Desktop`);
+    } else if(t.kind==="doc"){
+      const doc=desktopDocs.find((d)=> d.id===t.docId);
+      if(!doc) return;
+      showInfo(`${t.label} Properties`, `Type: ${doc.mime || "File"}\nLocation: C:\\Desktop\nSize: ${(doc.size/1024).toFixed(1)} KB\nCreated: ${new Date(doc.createdAt).toLocaleString()}\nModified: ${new Date(doc.updatedAt).toLocaleString()}`);
+    } else if(t.kind==="shortcut"){
+      const sc=desktopShortcuts.find((s)=> s.key===t.key);
+      const target = sc?.appId ? `Application: ${sc.appId}` : sc?.vfsId ? `File ID: ${sc.vfsId}` : sc?.explorerPath ? `Path: ${sc.explorerPath}` : "(unknown)";
+      showInfo(`${t.label} Properties`, `Type: Shortcut\nLocation: Desktop\nTarget: ${target}`);
+    } else {
+      showInfo("Run Properties", `Type: System command\nTarget: Run dialog`);
+    }
+  };
   // カスケード遷移時の角切り (Programs行→サブメニューへ斜め移動で一瞬枠外を
   // かすめる) で即閉じしないよう、閉鎖は遅延・再入場で取り消す。
   const closeTimer = useRef<number | null>(null);
@@ -1481,7 +2090,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         key={id}
         onClick={() => { openWindow(id, { silent: true }); closeMenus(); }}
         style={{ fontSize: 11, height:26, display:"flex", alignItems:"center", justifyContent:"flex-start" }}
-        onMouseDown={(e) => handleStartMenuItemPointerDown(e, id, def.title, def.iconSrc as any)}
+        onPointerDown={(e) => handleStartMenuItemPointerDown(e, id, def.title, def.iconSrc as any)}
       >
         <img src={def.iconSrc} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>{def.title}</span>
       </MenuListItem>
@@ -1492,7 +2101,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       key={doc.label}
       onClick={() => { openWindow(doc.appId, { silent: true }); closeMenus(); }}
       style={{ fontSize: 11, height:26, display:"flex", alignItems:"center", justifyContent:"flex-start" }}
-      onMouseDown={(e) => handleStartMenuItemPointerDown(e, doc.appId, doc.label, doc.iconSrc as any)}
+      onPointerDown={(e) => handleStartMenuItemPointerDown(e, doc.appId, doc.label, doc.iconSrc as any)}
     >
       <img src={doc.iconSrc} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering:"pixelated" as const }} /> <span style={{ flex:1, textAlign:"left" }}>{doc.label}</span>
     </MenuListItem>
@@ -1508,23 +2117,39 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
   }
 
   return (
+    <ScreenStage $virtual={isVirtualScreen} $bg={desktopBg}>
+      <div
+        id="wenge-virtual-screen"
+        style={{
+          width: viewW,
+          height: viewH,
+          transform: `scale(${viewScale})`,
+          transformOrigin: "center center",
+          flexShrink: 0,
+          // WindowFrameの最大サイズ制約を仮想画面に合わせる
+          ["--wenge-max-w" as any]: `${viewW}px`,
+          ["--wenge-max-h" as any]: `${viewH - 30}px`,
+        }}
+      >
     <Desktop
       $bg={desktopBg}
+      $w={viewW}
+      $h={viewH}
       ref={desktopRef}
+      data-wenge-drop="desktop"
       onClick={() => { if(suppressDesktopClick.current){ suppressDesktopClick.current=false; return; } setSelectedIds(new Set()); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); setContextMenu(null); }}
-      onMouseDown={handleDesktopMouseDown}
-      onMouseMove={handleDesktopMouseMove}
-      onMouseUp={handleDesktopMouseUp}
-      onMouseLeave={handleDesktopMouseUp}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onPointerDown={handleDesktopPointerDown}
+      onPointerMove={handleDesktopPointerMove}
+      onPointerUp={handleDesktopPointerUp}
+      onPointerCancel={handleDesktopPointerUp}
+      onPointerLeave={handleDesktopPointerUp}
       onContextMenu={handleDesktopContextMenu}
       onDragOver={handleDesktopDragOver}
       onDrop={handleDesktopDrop}
     >
       <IconsLayer>
         {desktopIcons.map((ic) => {
-          const pos=iconPos[ic.id] || getDefaultPos(0, window.innerWidth, window.innerHeight);
+          const pos=iconPos[ic.id] || getDefaultPos(0, viewW, viewH);
           const selected=selectedIds.has(ic.id);
           // ゴミ箱へドラッグ中のハイライト（選択色を反転気味に）
           const recycleHL = ic.id==="recycle" && draggingOverRecycle;
@@ -1533,12 +2158,12 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             <Icon
               key={ic.id}
               data-icon
+              data-icon-id={ic.id}
               $selected={hlSelected}
               $x={pos.x}
               $y={pos.y}
-              onMouseDown={(e)=> handleIconPointerDown(e, ic.id)}
-              onTouchStart={(e)=> handleIconPointerDown(e, ic.id)}
-              onClick={(e) => { e.stopPropagation(); }}
+              onPointerDown={(e)=> handleIconPointerDown(e, ic.id)}
+              onClick={(e) => { e.stopPropagation(); setContextMenu(null); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); }}
               onDoubleClick={(e) => { e.stopPropagation(); openWindow(ic.id, { silent: true }); }}
               title={recycleHL ? "ここにドロップで削除" : undefined}
             >
@@ -1555,14 +2180,26 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                 />
                 <IconFallback style={{ display: "none" }}>{ic.icon}</IconFallback>
               </div>
-              <IconLabel>{ic.label}</IconLabel>
+              <IconLabel>{renamingId===ic.id ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e)=> setRenameValue(e.target.value)}
+                  onClick={(e)=> e.stopPropagation()}
+                  onPointerDown={(e)=> e.stopPropagation()}
+                  onDoubleClick={(e)=> e.stopPropagation()}
+                  onKeyDown={(e)=>{ if(e.key==="Enter") void commitRename(); if(e.key==="Escape"){ setRenamingId(null); } e.stopPropagation(); }}
+                  onBlur={()=> void commitRename()}
+                  style={{ width: 72, fontSize: 11, textAlign: "center" }}
+                />
+              ) : ic.label}</IconLabel>
             </Icon>
           );
         })}
         {/* VFS実体ファイル (C:/Desktop・IndexedDB永続)。ダブルクリックで対応アプリに開く、ごみ箱DnDで削除 */}
         {desktopDocs.map((doc) => {
           const k=docIconKey(doc.id);
-          const pos=iconPos[k] || getDefaultPos(0, window.innerWidth, window.innerHeight);
+          const pos=iconPos[k] || getDefaultPos(0, viewW, viewH);
           const selected=selectedIds.has(k as AppId);
           const recycleHL=false;
           const hlSelected = selected || recycleHL;
@@ -1574,14 +2211,14 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             <Icon
               key={k}
               data-icon
+              data-icon-id={k}
               $selected={hlSelected}
               $x={pos.x}
               $y={pos.y}
-              onMouseDown={(e)=> handleIconPointerDown(e, k as AppId)}
-              onTouchStart={(e)=> handleIconPointerDown(e, k as AppId)}
-              onClick={(e) => { e.stopPropagation(); }}
+              onPointerDown={(e)=> onDesktopDocIconPointerDown(e, doc, k as AppId)}
+              onClick={(e) => { e.stopPropagation(); setContextMenu(null); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); }}
               onDoubleClick={(e) => { e.stopPropagation(); openVfsDoc(doc); }}
-              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to open, drag to Recycle Bin to delete`}
+              title={`${doc.name}\n${(doc.size/1024).toFixed(1)} KB · double-click to open, drag to Recycle Bin to delete, drag to Explorer window to move (Ctrl=copy)`}
             >
               <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
                 <IconImg
@@ -1596,7 +2233,65 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                 />
                 <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.fileWindows}</IconFallback>
               </div>
-              <IconLabel>{label}</IconLabel>
+              <IconLabel>{renamingId===k ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e)=> setRenameValue(e.target.value)}
+                  onClick={(e)=> e.stopPropagation()}
+                  onPointerDown={(e)=> e.stopPropagation()}
+                  onDoubleClick={(e)=> e.stopPropagation()}
+                  onKeyDown={(e)=>{ if(e.key==="Enter") void commitRename(); if(e.key==="Escape"){ setRenamingId(null); } e.stopPropagation(); }}
+                  onBlur={()=> void commitRename()}
+                  style={{ width: 72, fontSize: 11, textAlign: "center" }}
+                />
+              ) : label}</IconLabel>
+            </Icon>
+          );
+        })}
+        {/* ショートカット (Explorerの静的エントリ等)。ダブルクリックでアプリ/フォルダを開く */}
+        {desktopShortcuts.map((sc) => {
+          const pos=iconPos[sc.key] || getDefaultPos(0, viewW, viewH);
+          const selected=selectedIds.has(sc.key as AppId);
+          return (
+            <Icon
+              key={sc.key}
+              data-icon
+              data-icon-id={sc.key}
+              $selected={selected}
+              $x={pos.x}
+              $y={pos.y}
+              onPointerDown={(e)=> handleIconPointerDown(e, sc.key as AppId)}
+              onClick={(e) => { e.stopPropagation(); setContextMenu(null); setStartOpen(false); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setFindOpen(false); }}
+              onDoubleClick={(e) => { e.stopPropagation(); openDesktopShortcut(sc); }}
+              title={sc.vfsId ? `${sc.label}\nShortcut to original file` : sc.explorerPath ? `${sc.label}\nShortcut to ${sc.explorerPath}` : `${sc.label}\nShortcut`}
+            >
+              <div style={{ width: 32, height: 32, position: "relative", display: "grid", placeItems: "center" }}>
+                <IconImg
+                  src={sc.iconSrc}
+                  alt={sc.label}
+                  draggable={false}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                    const fb = (e.currentTarget as HTMLImageElement).nextElementSibling as HTMLElement | null;
+                    if (fb) fb.style.display = "grid";
+                  }}
+                />
+                <IconFallback style={{ display: "none" }}>{ICON_FALLBACK.fileWindows}</IconFallback>
+              </div>
+              <IconLabel>{renamingId===sc.key ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e)=> setRenameValue(e.target.value)}
+                  onClick={(e)=> e.stopPropagation()}
+                  onPointerDown={(e)=> e.stopPropagation()}
+                  onDoubleClick={(e)=> e.stopPropagation()}
+                  onKeyDown={(e)=>{ if(e.key==="Enter") void commitRename(); if(e.key==="Escape"){ setRenamingId(null); } e.stopPropagation(); }}
+                  onBlur={()=> void commitRename()}
+                  style={{ width: 72, fontSize: 11, textAlign: "center" }}
+                />
+              ) : sc.label}</IconLabel>
             </Icon>
           );
         })}
@@ -1605,9 +2300,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           const pos=iconPos["run"] || {x:12,y:12};
           const sel=selectedIds.has("run" as AppId);
           return (
-            <Icon $selected={sel} $x={pos.x} $y={pos.y} data-icon
-              onMouseDown={(e)=> handleIconPointerDown(e, "run" as AppId)}
-              onTouchStart={(e)=> handleIconPointerDown(e, "run" as AppId)}
+            <Icon $selected={sel} $x={pos.x} $y={pos.y} data-icon data-icon-id="run"
+              onPointerDown={(e)=> handleIconPointerDown(e, "run" as AppId)}
               onClick={e=>e.stopPropagation()}
               onDoubleClick={(e)=>{ e.stopPropagation(); openWindow("run", { silent: true }); }}
             >
@@ -1624,7 +2318,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         )}
         {/* スタートメニューからのドラッグゴースト */}
         {draggingFromStart && dragging?.hasMoved && (
-          <div style={{ position:"absolute", left:draggingFromStart.x-(desktopRef.current?.getBoundingClientRect().left??0)-40, top:draggingFromStart.y-(desktopRef.current?.getBoundingClientRect().top??0)-30, width:ICON_W, pointerEvents:"none", opacity:0.8, zIndex:9999 }}>
+          <div style={{ position:"absolute", left:draggingFromStart.x-40, top:draggingFromStart.y-30, width:ICON_W, pointerEvents:"none", opacity:0.8, zIndex:9999 }}>
             <div style={{ width:80, height:84, display:"flex", flexDirection:"column", alignItems:"center" }}>
               <div style={{ width:32, height:32, display:"grid", placeItems:"center" }}>
                 <img src={draggingFromStart.iconSrc} alt="" width={32} height={32} style={{ imageRendering:"pixelated" as const }} draggable={false} />
@@ -1637,17 +2331,40 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
 
       {/* R2→Desktop copy progress */}
       {docDropBusy && (
-        <div style={{ position: "fixed", right: 8, bottom: 38, zIndex: 9998, background: "#c0c0c0", border: "2px outset #fff", padding: "6px 10px", fontSize: 11 }}>
+        <div style={{ position: "absolute", right: 8, bottom: 38, zIndex: 9998, background: "#c0c0c0", border: "2px outset #fff", padding: "6px 10px", fontSize: 11 }}>
           {docDropBusy}
         </div>
       )}
-      {/* Context menu */}      {contextMenu && (
-        <ContextMenu data-context-menu $x={contextMenu.x} $y={contextMenu.y} onClick={e=>e.stopPropagation()}>
+      {/* Context menu */}      {contextMenu && contextMenu.target && (()=>{
+        const t=contextMenu.target as IconCtxTarget;
+        const isProtected = t.kind==="run" || (t.kind==="app" && t.id==="recycle");
+        return (
+        <ContextMenu data-context-menu $x={contextMenu.x} $y={contextMenu.y} onClick={(e)=>{ e.stopPropagation(); if(!(e.target as HTMLElement).closest('[role="menuitem"]')) setContextMenu(null); }} onPointerDown={e=>e.stopPropagation()} onContextMenu={e=>{ e.preventDefault(); e.stopPropagation(); }}>
+          <MenuList style={{ width:"100%" }}>
+            <MenuListItem primary onClick={()=>{ openCtxTarget(t); setContextMenu(null); }}><b>Open</b></MenuListItem>
+            <MenuListItem onClick={()=>{ exploreCtxTarget(t); setContextMenu(null); }}>Explore</MenuListItem>
+            <Separator />
+            <MenuListItem disabled={isProtected} onClick={()=>{ if(isProtected) return; copyCtxTarget(t, "cut"); setContextMenu(null); }}>Cut</MenuListItem>
+            <MenuListItem disabled={isProtected} onClick={()=>{ if(isProtected) return; copyCtxTarget(t, "copy"); setContextMenu(null); }}>Copy</MenuListItem>
+            <MenuListItem disabled={!clipboard} onClick={()=>{ void pasteClipboardAt({x: contextMenu.x, y: contextMenu.y}); setContextMenu(null); }}>Paste{clipboard ? ` (${clipboard.op==="cut" ? "Move" : "Copy"}: ${clipboard.label})` : ""}</MenuListItem>
+            <Separator />
+            <MenuListItem disabled={t.kind==="run"} onClick={()=>{ createShortcutOf(t); setContextMenu(null); }}>Create Shortcut</MenuListItem>
+            <MenuListItem disabled={isProtected} onClick={()=>{ void deleteCtxTarget(t); setContextMenu(null); }}>Delete</MenuListItem>
+            <MenuListItem disabled={isProtected} onClick={()=>{ startRename(t); setContextMenu(null); }}>Rename</MenuListItem>
+            <Separator />
+            <MenuListItem onClick={()=>{ propertiesOf(t); setContextMenu(null); }}>Properties</MenuListItem>
+          </MenuList>
+        </ContextMenu>
+        );
+      })()}
+      {contextMenu && !contextMenu.target && (
+        <ContextMenu data-context-menu $x={contextMenu.x} $y={contextMenu.y} onClick={(e)=>{ e.stopPropagation(); if(!(e.target as HTMLElement).closest('[role="menuitem"]')) setContextMenu(null); }} onPointerDown={e=>e.stopPropagation()} onContextMenu={e=>{ e.preventDefault(); e.stopPropagation(); }}>
           <MenuList style={{ width:"100%" }}>
             <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Auto Arrange</MenuListItem>
-            <MenuListItem onClick={()=>{ autoArrange(); setContextMenu(null); }}>Line up Icons</MenuListItem>
+            <MenuListItem onClick={()=>{ lineUpIcons(); setContextMenu(null); }}>Line up Icons</MenuListItem>
             <Separator />
-            <MenuListItem onClick={()=>{ setContextMenu(null); location.reload(); }}>Refresh</MenuListItem>
+            <MenuListItem disabled={!clipboard} onClick={()=>{ void pasteClipboardAt({x: contextMenu.x, y: contextMenu.y}); setContextMenu(null); }}>Paste{clipboard ? ` (${clipboard.op==="cut" ? "Move" : "Copy"}: ${clipboard.label})` : ""}</MenuListItem>
+            <MenuListItem onClick={()=>{ refreshDesktop(); setContextMenu(null); }}>Refresh</MenuListItem>
             <MenuListItem onClick={()=>{ setContextMenu(null); showInfo("Wenge 95", "Wenge 95\nProperties: 800x600, 256 colors"); }}>Properties</MenuListItem>
           </MenuList>
         </ContextMenu>
@@ -1658,7 +2375,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
         const def = APP_DEFS[w.id];
         let comp: React.ReactNode = def.component;
         if (w.id === "recycle") comp = <RecycleBinApp playSound={playDing} />;
-        if (w.id === "explorer") comp = <ExplorerApp onOpenApp={(id, file) => { if (file) { const doc: DesktopDoc = { id: file.id, name: file.name, mime: file.mime || "", size: file.size, createdAt: file.createdAt, updatedAt: file.updatedAt, blob: file.blob, sourceUrl: file.sourceUrl, sourceR2Key: file.sourceR2Key }; setVfsFileByApp((prev) => ({ ...prev, [id]: doc })); } openWindow(id as AppId, { silent: true }); }} />;
+        if (w.id === "explorer") comp = <ExplorerApp key={explorerOpenKey === 0 ? "explorer" : `explorer-${explorerOpenKey}`} initialPath={explorerInitPath} onOpenApp={(id, file) => { if (file) { const doc: DesktopDoc = { id: file.id, name: file.name, mime: file.mime || "", size: file.size, createdAt: file.createdAt, updatedAt: file.updatedAt, blob: file.blob, sourceUrl: file.sourceUrl, sourceR2Key: file.sourceR2Key }; setVfsFileByApp((prev) => ({ ...prev, [id]: doc })); } openWindow(id as AppId, { silent: true }); }} />;
         if (w.id === "run") comp = <RunDialog onClose={() => closeWindow("run")} onRun={(id) => openWindow(id as AppId, { silent: true })} />;
         if (w.id === "notepad") {
           const f = vfsFileByApp["notepad"];
@@ -1699,6 +2416,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
             zIndex={w.z}
             maximized={w.isMaximized}
             active={focusedId === w.id}
+            scale={viewScale}
             onFocus={() => focusWindow(w.id)}
             onClose={() => closeWindow(w.id)}
             onMinimize={() => minimizeWindow(w.id)}
@@ -1717,9 +2435,10 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
       {/* BSOD */}
       {showBsod && (
         <div
+          data-bsod
           onClick={() => setShowBsod(false)}
           style={{
-            position: "fixed", inset: 0, background: "#0000aa", color: "#fff", zIndex: 10000,
+            position: "absolute", inset: 0, background: "#0000aa", color: "#fff", zIndex: 10000,
             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
             fontFamily: "monospace", padding: 40, cursor: "url('/cursors/hand.png') 12 0, pointer"
           }}
@@ -1757,7 +2476,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                       <span style={{ flex:1, textAlign:"left" }}>Programs</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                     </MenuListItem>
                     {programsOpen && (
-                      <ProgramsSubmenu>
+                      <ProgramsSubmenu scale={viewScale} viewH={viewH}>
                         {/* トップ階層は10行・約245pxで確定しスクロール不要のため
                             Win95Scrollを挟まない (5px程度の誤差オーバーフローによる
                             誤スクロールバー/ヒットテスト不安定化を構造的に排除)。
@@ -1770,9 +2489,9 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                                   <img src={ICONS.folderClosed} alt="" width={20} height={20} style={{ marginRight:5, imageRendering:"pixelated" as const }} /> <span style={{ flex:1, textAlign:"left" }}>{g.label}</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span>
                                 </MenuListItem>
                                 {openSub===g.label && (
-                                  <ProgramsSubmenu>
+                                  <ProgramsSubmenu scale={viewScale} viewH={viewH}>
                                     <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", display:"flex", flexDirection:"column", flex:1, minHeight:0, minWidth:0, maxHeight:"inherit", overflow:"hidden", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
-                                      <Win95Scroll style={{ flex:1, minHeight:0, minWidth:0, width:"100%" }} maxHeight="calc(100dvh - 88px)">
+                                      <Win95Scroll style={{ flex:1, minHeight:0, minWidth:0, width:"100%" }} maxHeight={isVirtualScreen ? `${viewH - 88}px` : "calc(100dvh - 88px)"}>
                                         <MenuList style={{ width:"100%" }}>
                                           {g.ids.map(renderProgramItem)}
                                         </MenuList>
@@ -1794,7 +2513,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                    <div onMouseEnter={()=>{ cancelMenuClose(); setDocumentsOpen(true); setProgramsOpen(false); setSettingsOpen(false); setFindOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
                      <MenuListItem onClick={() => { cancelMenuClose(); setDocumentsOpen(true); setProgramsOpen(false); setSettingsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.explorer} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /> <span style={{ flex:1, textAlign:"left" }}>Documents</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
                      {documentsOpen && (
-                       <ProgramsSubmenu>
+                       <ProgramsSubmenu scale={viewScale} viewH={viewH}>
                          <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
                            <MenuList style={{ width:"100%" }}>
                              {DOCUMENTS_ITEMS.map(renderDocumentsItem)}
@@ -1807,7 +2526,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                    <div onMouseEnter={()=>{ cancelMenuClose(); setSettingsOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setFindOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
                      <MenuListItem onClick={() => { cancelMenuClose(); setSettingsOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setFindOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.controlPanel} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Settings</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
                      {settingsOpen && (
-                       <ProgramsSubmenu>
+                       <ProgramsSubmenu scale={viewScale} viewH={viewH}>
                          <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
                            <MenuList style={{ width:"100%" }}>
                              {SETTINGS_ITEMS.map(renderDocumentsItem)}
@@ -1820,7 +2539,7 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
                    <div onMouseEnter={()=>{ cancelMenuClose(); setFindOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); setOpenSub(null); }} onMouseLeave={()=>scheduleMenuClose()} style={{ position:"relative" }}>
                      <MenuListItem onClick={() => { cancelMenuClose(); setFindOpen(true); setProgramsOpen(false); setDocumentsOpen(false); setSettingsOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.find} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Find</span> <span style={{ marginLeft:"auto", fontSize:8 }}>►</span></MenuListItem>
                      {findOpen && (
-                       <ProgramsSubmenu>
+                       <ProgramsSubmenu scale={viewScale} viewH={viewH}>
                          <Frame variant="outside" style={{ padding:2, background:"#c0c0c0", cursor: "url('/cursors/arrow.png') 0 0, default" }}>
                            <MenuList style={{ width:"100%" }}>
                              {FIND_ITEMS.map(renderDocumentsItem)}
@@ -1890,6 +2609,8 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
           </Frame>
         </Toolbar>
       </Taskbar>
-    </Desktop>
+      </Desktop>
+      </div>
+    </ScreenStage>
   );
 }

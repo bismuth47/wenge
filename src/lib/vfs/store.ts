@@ -132,9 +132,90 @@ export async function getVfsFile(id: string): Promise<VfsFile | undefined> {
   }
 }
 
+/**
+ * Move a VFS file into another directory (same id, new path).
+ * Same-dir moves are a no-op (returns the file unchanged).
+ * Name collisions are resolved with the same " (2)" suffix rule as save.
+ */
+export async function moveVfsFile(id: string, targetDir: string): Promise<VfsFile> {
+  const dir = normalizeVfsDir(targetDir);
+  const src = await getVfsFile(id);
+  if (!src) throw new Error("Source file not found.");
+  if (normalizeVfsDir(src.dir) === dir) return src;
+  await ensureVfsDir(dir);
+  const siblings = await listVfsDir(dir);
+  const taken = new Set(siblings.map((f) => normalizeVfsPath(f.path)));
+  const oldDir = normalizeVfsDir(src.dir);
+  const path = uniquePath(dir, src.name, taken);
+  const now = new Date().toISOString();
+  const moved: VfsFile = {
+    ...src,
+    path,
+    name: vfsBasename(path),
+    dir: vfsDirname(path),
+    updatedAt: now,
+  };
+  await ensureVfsDir(moved.dir);
+  await vfsTx(VFS_FILES_STORE, "readwrite", (t) => t.objectStore(VFS_FILES_STORE).put(moved));
+  notifyVfsChanged(oldDir);
+  notifyVfsChanged(moved.dir);
+  return moved;
+}
+
 export async function mkdirVfs(dir: string): Promise<void> {
   await ensureVfsDir(dir);
   notifyVfsChanged(normalizeVfsDir(dir));
+}
+
+/**
+ * Rename a VFS file within its directory (same id, new name/path).
+ * Name collisions are resolved with the same " (2)" suffix rule as save.
+ */
+export async function renameVfsFile(id: string, newName: string): Promise<VfsFile> {
+  const src = await getVfsFile(id);
+  if (!src) throw new Error("Source file not found.");
+  const clean = (newName || "").trim().split("/").pop()!.split("\\").pop() || src.name;
+  if (clean === src.name) return src;
+  const dir = normalizeVfsDir(src.dir);
+  const siblings = await listVfsDir(dir);
+  const taken = new Set(siblings.filter((f) => f.id !== id).map((f) => normalizeVfsPath(f.path)));
+  const path = uniquePath(dir, clean, taken);
+  const now = new Date().toISOString();
+  const renamed: VfsFile = {
+    ...src,
+    path,
+    name: vfsBasename(path),
+    updatedAt: now,
+  };
+  await vfsTx(VFS_FILES_STORE, "readwrite", (t) => t.objectStore(VFS_FILES_STORE).put(renamed));
+  notifyVfsChanged(dir);
+  return renamed;
+}
+
+/**
+ * Copy a VFS file into a directory (new id). Used for desktop Copy/Paste.
+ */
+export async function copyVfsFile(id: string, targetDir: string): Promise<VfsFile> {
+  const src = await getVfsFile(id);
+  if (!src) throw new Error("Source file not found.");
+  const dir = normalizeVfsDir(targetDir);
+  await ensureVfsDir(dir);
+  const siblings = await listVfsDir(dir);
+  const taken = new Set(siblings.map((f) => normalizeVfsPath(f.path)));
+  const path = uniquePath(dir, src.name, taken);
+  const now = new Date().toISOString();
+  const copy: VfsFile = {
+    ...src,
+    id: newVfsId(),
+    path,
+    name: vfsBasename(path),
+    dir: vfsDirname(path),
+    createdAt: now,
+    updatedAt: now,
+  };
+  await vfsTx(VFS_FILES_STORE, "readwrite", (t) => t.objectStore(VFS_FILES_STORE).put(copy));
+  notifyVfsChanged(dir);
+  return copy;
 }
 
 /** React hook: watch one VFS directory (Desktop icons auto-update). */

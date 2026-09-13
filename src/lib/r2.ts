@@ -3,9 +3,28 @@ export type R2List = { files: R2File[]; folders: string[]; prefix: string; note?
 
 /** Drag payload shared between Explorer (source) and Desktop (target). */
 export const R2_DRAG_MIME = "application/x-wenge-r2";
+/** 修飾キー付きドロップの動作 (Win準拠: 無修飾=move / Ctrl=copy / Alt=shortcut) */
+export type WengeDropAction = "move" | "copy" | "shortcut";
+export type WengeDropModifiers = { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean };
+export function resolveDropAction(mod?: WengeDropModifiers, fallback: WengeDropAction = "move"): WengeDropAction {
+  if (mod?.altKey) return "shortcut";
+  if (mod?.ctrlKey) return "copy";
+  return fallback;
+}
+/** bodyに付与してDnD中のカーソルを move_hand.png に固定するためのクラス */
+export const WENGE_DRAGGING_CLASS = "wenge-dragging";
+export function markWengeDragStart() {
+  try { document.body.classList.add(WENGE_DRAGGING_CLASS); } catch {}
+}
+export function markWengeDragEnd() {
+  try { document.body.classList.remove(WENGE_DRAGGING_CLASS); } catch {}
+}
 export type R2DragItem =
   | { kind: "file"; key: string; name: string; url: string; size: number; mime: string }
-  | { kind: "folder"; prefix: string; name: string };
+  | { kind: "folder"; prefix: string; name: string }
+  | { kind: "vfs-file"; id: string; name: string; mime: string; size: number }
+  /** 実体のない仮想エントリ (C:\系静的表示など)。ドロップ先でショートカット化する */
+  | { kind: "shortcut"; label: string; appId?: string; explorerPath?: string; iconSrc?: string; vfsId?: string };
 
 export function normalizePrefix(p: string): string {
   const s = p.replace(/^\/+/, "");

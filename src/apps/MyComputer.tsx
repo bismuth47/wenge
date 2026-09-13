@@ -2,6 +2,7 @@ import { Button, Fieldset, ProgressBar, Select, TextInput } from "react95";
 import { useState } from "react";
 import { ICONS } from "../assets/icons";
 import { showInfo } from "../components/SystemDialog";
+import { getResolution, getUiScale } from "../lib/display";
 
 export function MyComputerApp() {
   const [view, setView] = useState("Details");
@@ -49,7 +50,7 @@ export function MyComputerApp() {
           <div>OS: Wenge 95 ver 4.0.950</div>
           <div>CPU: WengeChip 133MHz</div>
           <div>Memory: 32MB RAM</div>
-          <div>Resolution: 800x600 256 colors</div>
+          <div>Resolution: {(() => { const r = getResolution(); return r === "native" ? `Native (${window.innerWidth}x${window.innerHeight})` : r; })()} · UI {getUiScale()}% · 256 colors</div>
           {view === "Details" && <div style={{ fontSize: 11, color: "#333" }}>User: Wenge · Uptime: {Math.floor(performance.now() / 60000)} min · Shell: Explorer</div>}
         </div>
         <div style={{ marginTop: 8, display: "flex", gap: 8 }}>

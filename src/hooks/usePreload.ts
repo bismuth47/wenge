@@ -53,7 +53,10 @@ const CURSORS = [
   "/cursors/wait.png",
   "/cursors/appstarting.png",
   "/cursors/move.png",
+  "/cursors/move_hand.png",
   "/cursors/hand.png",
+  // Animated wait (busy) frames wait_0..wait_7, used during async loads (e.g. Explorer folder navigation)
+  ...Array.from({ length: 8 }, (_, i) => `/cursors/wait_${i}.png`),
 ] as const;
 
 const EXTRA_ICONS = ["/icons/start.png", "/icons/start-16.png", "/favicon.svg"] as const;

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, TextInput, ProgressBar, Anchor, Frame, MenuList, MenuListItem, Separator } from "react95";
 import { showError } from "../components/SystemDialog";
+import { CloseGlyph } from "../components/CaptionGlyphs";
 import { getVfsDirByExt } from "../lib/downloadTarget";
 import { saveUrlToVfs } from "../lib/vfs/download";
 import type { VfsFile } from "../lib/vfs/types";
 import { consumePendingVfsFile } from "../lib/vfs/openWith";
+import { getViewMetrics, toVirtualPoint } from "../lib/display";
 
 const QUICK_LINKS = [
   "https://www.bing.com/",
@@ -73,71 +75,169 @@ function fileNameForSave(pageUrl: string, disposition: string | null): string {
 
 type BlockInfo = { query: string; code: string | null; email: string | null; originalUrl: string };
 
+type IeTab = {
+  id: string;
+  title: string;
+  address: string;
+  currentUrl: string;
+  historyStack: string[];
+  hIndex: number;
+  vfsHtml: string | null;
+  vfsName: string | null;
+  statusText: string;
+  error: string | null;
+  ddgBlocked: BlockInfo | null;
+  loading: boolean;
+  reloadKey: number;
+};
+
+let ieTabSeq = 1;
+function createBlankTab(): IeTab {
+  return {
+    id: `tab-${Date.now()}-${ieTabSeq++}`,
+    title: "空白ページ",
+    address: "",
+    currentUrl: "",
+    historyStack: [],
+    hIndex: -1,
+    vfsHtml: null,
+    vfsName: null,
+    statusText: "準備完了 - URLまたは検索ワードを入力してください",
+    error: null,
+    ddgBlocked: null,
+    loading: false,
+    reloadKey: 0,
+  };
+}
+
+function deriveTabTitle(t: Pick<IeTab, "currentUrl" | "address" | "vfsName">): string {
+  if (t.vfsName) return t.vfsName.length > 18 ? t.vfsName.slice(0, 17) + "…" : t.vfsName;
+  const src = t.currentUrl || t.address.trim();
+  if (!src) return "空白ページ";
+  try {
+    const s = isProbablyUrl(src) ? normalizeUrl(src) : null;
+    if (s) {
+      const u = new URL(s);
+      const host = u.hostname.replace(/^www\./, "");
+      return host.length > 20 ? host.slice(0, 19) + "…" : host;
+    }
+  } catch {}
+  const short = src.trim();
+  return short.length > 18 ? short.slice(0, 17) + "…" : short;
+}
+
+function iframeSrcFor(tab: Pick<IeTab, "vfsHtml" | "currentUrl">): string {
+  if (tab.vfsHtml) return "about:blank";
+  return tab.currentUrl ? `/api/proxy?url=${encodeURIComponent(tab.currentUrl)}` : "about:blank";
+}
+
 export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
-  const [address, setAddress] = useState("");
-  const [currentUrl, setCurrentUrl] = useState("");
-  const [historyStack, setHistoryStack] = useState<string[]>([]);
-  const [hIndex, setHIndex] = useState(-1);
-  const hIndexRef = useRef(-1);
-  const currentUrlRef = useRef("");
-  useEffect(() => {
-    currentUrlRef.current = currentUrl;
-  }, [currentUrl]);
+  const [tabs, setTabs] = useState<IeTab[]>(() => [createBlankTab()]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   // 全サイトをプロキシ経由で表示する (直接表示は廃止: 右クリック横取り・XFO/CSP回避のため)
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [statusText, setStatusText] = useState("準備完了 - URLまたは検索ワードを入力してください");
-  const [ddgBlocked, setDdgBlocked] = useState<BlockInfo | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [vfsHtml, setVfsHtml] = useState<string | null>(null);
-  const blobUrlRef = useRef<string | null>(null);
+
+  const activeTab: IeTab = tabs.find((t) => t.id === (activeId ?? tabs[0]?.id)) ?? tabs[0];
+  const activeTabId = activeTab?.id ?? null;
+
+  const updateTab = useCallback((id: string, patch: Partial<IeTab> | ((prev: IeTab) => Partial<IeTab>)) => {
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, ...(typeof patch === "function" ? patch(t) : patch) } : t)));
+  }, []);
 
   // Wenge内右クリックメニュー (Win95風)。iframe内のcontextmenuを横取りして表示する。
   type IeMenuState = { x: number; y: number; linkUrl?: string | null; imgUrl?: string | null; selText?: string | null };
   const [ieMenu, setIeMenu] = useState<IeMenuState | null>(null);
   const ieRootRef = useRef<HTMLDivElement>(null);
-  const ctxCleanupRef = useRef<(() => void) | null>(null);
+  const ctxCleanupMap = useRef(new Map<string, () => void>());
+  const linkCleanupMap = useRef(new Map<string, () => void>());
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeEls = useRef(new Map<string, HTMLIFrameElement | null>());
+  const setIframeEl = useCallback((id: string) => (el: HTMLIFrameElement | null) => {
+    if (el) iframeEls.current.set(id, el);
+    else iframeEls.current.delete(id);
+  }, []);
 
+  const lastFileKeyRef = useRef<string | null>(null);
+
+  // Check proxy response for DDG bot block before committing iframe
+  // ---- tabs ----
+  const activeTabIdRef = useRef<string | null>(null);
   useEffect(() => {
-    hIndexRef.current = hIndex;
-  }, [hIndex]);
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+  const navigateToRef = useRef<(raw: string, tabId?: string) => void>(() => {});
 
+  const closeTab = useCallback((id: string) => {
+    try { ctxCleanupMap.current.get(id)?.(); } catch {}
+    ctxCleanupMap.current.delete(id);
+    try { linkCleanupMap.current.get(id)?.(); } catch {}
+    linkCleanupMap.current.delete(id);
+    iframeEls.current.delete(id);
+    setIeMenu(null);
+    setTabs((prev) => {
+      if (prev.length <= 1) {
+        // 最後の1つは空白化して残す
+        return prev.map((t) => (t.id === id ? { ...createBlankTab(), id: t.id } : t));
+      }
+      const idx = prev.findIndex((t) => t.id === id);
+      const next = prev.filter((t) => t.id !== id);
+      if (id === activeTabIdRef.current) {
+        const fallback = next[Math.max(0, idx - 1)] ?? next[0];
+        setActiveId(fallback.id);
+      }
+      return next;
+    });
+  }, []);
+
+  const addTab = useCallback((initialUrl?: string) => {
+    const t = createBlankTab();
+    setTabs((prev) => [...prev, t]);
+    setActiveId(t.id);
+    activeTabIdRef.current = t.id;
+    setFallbackNotice(null);
+    if (initialUrl) {
+      setTimeout(() => navigateToRef.current(initialUrl, t.id), 0);
+    }
+    return t.id;
+  }, []);
+
+  // file prop / 共有pendingは「新規タブで開く」。既存タブは潰さない。
   useEffect(() => {
     const pending = file ?? consumePendingVfsFile();
     if (!pending?.blob) return;
-    const url = URL.createObjectURL(pending.blob);
-    blobUrlRef.current = url;
+    const key = `${pending.name}:${pending.blob.size}:${("lastModified" in pending.blob && (pending.blob as File).lastModified) || 0}`;
+    if (lastFileKeyRef.current === key) return;
+    lastFileKeyRef.current = key;
     pending.blob.text().then((text) => {
-      setVfsHtml(text);
-      setCurrentUrl("");
-      setAddress(pending.name);
-      setStatusText(`VFS: ${pending.name}`);
+      const title = pending.name.length > 18 ? pending.name.slice(0, 17) + "…" : pending.name;
+      let reuseId: string | null = null;
+      setTabs((prev) => {
+        const first = prev[0];
+        if (prev.length === 1 && first && !first.currentUrl && !first.vfsHtml && !first.address) {
+          reuseId = first.id;
+          return [{
+            ...first, vfsHtml: text, vfsName: pending.name, address: pending.name,
+            title, statusText: `VFS: ${pending.name}`, currentUrl: "", error: null,
+          }];
+        }
+        const t = createBlankTab();
+        t.vfsHtml = text;
+        t.vfsName = pending.name;
+        t.address = pending.name;
+        t.title = title;
+        t.statusText = `VFS: ${pending.name}`;
+        reuseId = t.id;
+        return [...prev, t];
+      });
+      setTimeout(() => { if (reuseId) { setActiveId(reuseId); activeTabIdRef.current = reuseId; } }, 0);
     }).catch(() => {
-      setError("HTMLファイルの読み込みに失敗しました。");
+      const id = activeTabIdRef.current;
+      if (id) updateTab(id, { error: "HTMLファイルの読み込みに失敗しました。" });
     });
-    return () => {
-      URL.revokeObjectURL(url);
-      if (blobUrlRef.current === url) blobUrlRef.current = null;
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
-  const iframeSrc = vfsHtml
-    ? "about:blank"
-    : currentUrl
-      ? `/api/proxy?url=${encodeURIComponent(currentUrl)}`
-      : "about:blank";
-
-  useEffect(() => {
-    if (!vfsHtml) return;
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    iframe.srcdoc = vfsHtml;
-  }, [vfsHtml]);
-
-  // Check proxy response for DDG bot block before committing iframe
   const checkDdgBlocked = useCallback(async (proxyUrl: string): Promise<{ blocked: boolean; code: string | null; email: string | null }> => {
     try {
       const res = await fetch(proxyUrl);
@@ -167,12 +267,13 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   }, []);
 
   const navigateTo = useCallback(
-    (raw: string, opts?: { replaceHistory?: boolean; forceProxy?: boolean }) => {
+    (raw: string, tabId?: string, opts?: { replaceHistory?: boolean; forceProxy?: boolean }) => {
       void opts;
+      const id = tabId ?? activeTabIdRef.current;
+      if (!id) return;
       const trimmed = raw.trim();
       if (!trimmed) {
-        setError("URLまたは検索ワードを入力してください。");
-        setStatusText("Navigation canceled");
+        updateTab(id, { error: "URLまたは検索ワードを入力してください。", statusText: "Navigation canceled" });
         return;
       }
 
@@ -181,8 +282,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       if (isProbablyUrl(trimmed)) {
         const normalized = normalizeUrl(trimmed);
         if (!normalized) {
-          setError("無効なURLです。http:// または https:// で始まるURLを入力してください。");
-          setStatusText("Navigation canceled");
+          updateTab(id, { error: "無効なURLです。http:// または https:// で始まるURLを入力してください。", statusText: "Navigation canceled" });
           return;
         }
         targetUrl = normalized;
@@ -192,145 +292,119 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         targetUrl = toBingUrl(trimmed);
       }
 
-      setError(null);
-      setDdgBlocked(null);
+      const title = deriveTabTitle({ currentUrl: targetUrl, address: targetUrl, vfsName: null });
+      setTabs((prev) => prev.map((t) => {
+        if (t.id !== id) return t;
+        let historyStack = t.historyStack;
+        let hIndex = t.hIndex;
+        if (!opts?.replaceHistory) {
+          const truncated = t.historyStack.slice(0, t.hIndex + 1);
+          if (truncated[truncated.length - 1] !== targetUrl) {
+            historyStack = [...truncated, targetUrl];
+            hIndex = historyStack.length - 1;
+          }
+        } else {
+          const next = [...t.historyStack];
+          next[t.hIndex] = targetUrl;
+          historyStack = next;
+        }
+        const sameUrl = targetUrl === t.currentUrl;
+        return {
+          ...t, error: null, ddgBlocked: null, vfsHtml: null, vfsName: null,
+          statusText: searchQuery ? `Bingで検索(プロキシ経由): ${searchQuery}` : `互換表示(プロキシ経由)で開いています: ${targetUrl}`,
+          loading: true, historyStack, hIndex,
+          currentUrl: targetUrl, address: targetUrl, title,
+          reloadKey: sameUrl ? t.reloadKey + 1 : t.reloadKey,
+        };
+      }));
       setFallbackNotice(null);
-      setVfsHtml(null);
-      setStatusText(`Opening ${targetUrl}...`);
-      setLoading(true);
-
-      const curIdx = hIndexRef.current;
-      if (!opts?.replaceHistory) {
-        setHistoryStack((prev) => {
-          const truncated = prev.slice(0, curIdx + 1);
-          if (truncated[truncated.length - 1] === targetUrl) return prev;
-          const next = [...truncated, targetUrl];
-          setHIndex(next.length - 1);
-          return next;
-        });
-      } else {
-        setHistoryStack((prev) => {
-          const next = [...prev];
-          next[curIdx] = targetUrl;
-          return next;
-        });
-      }
-
-      // 全サイトをプロキシ経由で窓内表示。
-      // loadingはiframeのonLoad/onErrorまで維持する (同期的にfalseに戻すと
-      // 読込中のカーソル・ProgressBar表示が消えてしまう)。
-      // 同一URLへの再遷移はsrcが変わらずonLoadが来ないためreloadKeyで強制再マウントする。
-      if (targetUrl === currentUrlRef.current) {
-        setReloadKey((k) => k + 1);
-      }
-      currentUrlRef.current = targetUrl;
-      setCurrentUrl(targetUrl);
-      setAddress(targetUrl);
-      if (searchQuery) {
-        setStatusText(`Bingで検索(プロキシ経由): ${searchQuery}`);
-      } else {
-        setStatusText(`互換表示(プロキシ経由)で開いています: ${targetUrl}`);
-      }
     },
-    [],
+    [updateTab],
   );
 
   useEffect(() => {
-    if (historyStack.length === 0) {
-      if (hIndex !== -1) setHIndex(-1);
-      return;
-    }
-    if (hIndex >= historyStack.length) setHIndex(historyStack.length - 1);
-    if (hIndex < 0) setHIndex(0);
-  }, [historyStack, hIndex]);
+    navigateToRef.current = (raw: string, tabId?: string) => navigateTo(raw, tabId);
+  }, [navigateTo]);
 
-  const goBack = () => {
-    if (hIndex <= 0) return;
-    const nextIdx = hIndex - 1;
-    const url = historyStack[nextIdx];
-    setHIndex(nextIdx);
-    setError(null);
-    setDdgBlocked(null);
+  const goBack = (tabId?: string) => {
+    const id = tabId ?? activeTabIdRef.current;
+    if (!id) return;
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab || tab.hIndex <= 0) return;
+    const nextIdx = tab.hIndex - 1;
+    const url = tab.historyStack[nextIdx];
+    updateTab(id, {
+      hIndex: nextIdx, error: null, ddgBlocked: null, vfsHtml: null, vfsName: null,
+      statusText: `Opening ${url}...`, loading: true, currentUrl: url, address: url,
+      title: deriveTabTitle({ currentUrl: url, address: url, vfsName: null }),
+    });
     setFallbackNotice(null);
-    setVfsHtml(null);
-    setStatusText(`Opening ${url}...`);
-    // onLoadまで維持 (下でfalseに戻さない)
-    setLoading(true);
-    setCurrentUrl(url);
-    setAddress(url);
   };
 
-  const goForward = () => {
-    if (hIndex >= historyStack.length - 1) return;
-    const nextIdx = hIndex + 1;
-    const url = historyStack[nextIdx];
-    setHIndex(nextIdx);
-    setError(null);
-    setDdgBlocked(null);
+  const goForward = (tabId?: string) => {
+    const id = tabId ?? activeTabIdRef.current;
+    if (!id) return;
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab || tab.hIndex >= tab.historyStack.length - 1) return;
+    const nextIdx = tab.hIndex + 1;
+    const url = tab.historyStack[nextIdx];
+    updateTab(id, {
+      hIndex: nextIdx, error: null, ddgBlocked: null, vfsHtml: null, vfsName: null,
+      statusText: `Opening ${url}...`, loading: true, currentUrl: url, address: url,
+      title: deriveTabTitle({ currentUrl: url, address: url, vfsName: null }),
+    });
     setFallbackNotice(null);
-    setVfsHtml(null);
-    setStatusText(`Opening ${url}...`);
-    // onLoadまで維持 (下でfalseに戻さない)
-    setLoading(true);
-    setCurrentUrl(url);
-    setAddress(url);
   };
 
-  const handleRefresh = () => {
-    if (!currentUrl) return;
-    setError(null);
-    setDdgBlocked(null);
+  const handleRefresh = (tabId?: string) => {
+    const id = tabId ?? activeTabIdRef.current;
+    if (!id) return;
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab || !tab.currentUrl) return;
+    updateTab(id, (t) => ({
+      error: null, ddgBlocked: null, loading: true,
+      statusText: `Refreshing ${t.currentUrl}...`, reloadKey: t.reloadKey + 1,
+    }));
     setFallbackNotice(null);
-    setLoading(true);
-    setStatusText(`Refreshing ${currentUrl}...`);
-    setReloadKey((k) => k + 1);
-    // onLoadでfalseに戻る
   };
 
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const handleStop = () => {
-    setLoading(false);
-    setStatusText("Navigation stopped");
-    if (iframeRef.current) {
+  const handleStop = (tabId?: string) => {
+    const id = tabId ?? activeTabIdRef.current;
+    if (!id) return;
+    updateTab(id, { loading: false, statusText: "Navigation stopped" });
+    const iframe = iframeEls.current.get(id);
+    if (iframe) {
       try {
-        iframeRef.current.src = "about:blank";
+        iframe.src = "about:blank";
         setTimeout(() => {
-          if (iframeRef.current && currentUrl) iframeRef.current.src = iframeSrc;
+          const el = iframeEls.current.get(id);
+          const cur = tabs.find((t) => t.id === id);
+          if (el && cur?.currentUrl) el.src = iframeSrcFor(cur);
         }, 0);
       } catch {}
     }
   };
 
-  const handleGo = () => navigateTo(address);
+  const handleGo = () => { if (activeTab) navigateTo(activeTab.address, activeTab.id); };
   const handleAddressKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") navigateTo(address);
+    if (e.key === "Enter" && activeTab) navigateTo(activeTab.address, activeTab.id);
   };
 
-  // onLoadが来ないまま固まった場合の安全弁 (20秒で読込表示・待機カーソルを解除)
-  useEffect(() => {
-    if (!loading) return;
-    const t = window.setTimeout(() => {
-      setLoading(false);
-      setStatusText((s) => (s.startsWith("Opening") || s.startsWith("Refreshing") ? `${s} (timed out)` : s));
-    }, 20000);
-    return () => window.clearTimeout(t);
-  }, [loading, currentUrl, reloadKey]);
-
-  // Save the current page to Wenge VFS via /api/proxy
+  // Save the active tab page to Wenge VFS via /api/proxy
   const handleSave = async () => {
-    const target = currentUrl || address.trim();
-    if (!target) {
-      setError("保存するページを開いてください。");
+    const tab = tabs.find((t) => t.id === activeTabId);
+    const target = tab?.currentUrl || tab?.address.trim() || "";
+    if (!target || !tab) {
+      if (activeTabId) updateTab(activeTabId, { error: "保存するページを開いてください。" });
       return;
     }
     const pageUrl = isProbablyUrl(target) ? normalizeUrl(target) : null;
     if (!pageUrl) {
-      setError("保存できるURLではありません。ファイルのURLを開いてから保存してください。");
+      updateTab(tab.id, { error: "保存できるURLではありません。ファイルのURLを開いてから保存してください。" });
       return;
     }
     setSaving(true);
-    setStatusText(`Saving ${pageUrl} → Wenge...`);
+    updateTab(tab.id, { statusText: `Saving ${pageUrl} → Wenge...` });
     try {
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(pageUrl)}`);
       if (!res.ok) {
@@ -340,32 +414,29 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           const j = JSON.parse(body);
           if (j?.error) msg = `保存に失敗しました: ${j.error}`;
         } catch {}
-        setError(msg);
-        setStatusText("Save failed");
+        updateTab(tab.id, { error: msg, statusText: "Save failed" });
         return;
       }
       const ct = res.headers.get("content-type") || "";
       if (ct.includes("application/json")) {
-        setError("このページは保存できません（プロキシがブロックを検出）。");
-        setStatusText("Save failed");
+        updateTab(tab.id, { error: "このページは保存できません（プロキシがブロックを検出）。", statusText: "Save failed" });
         return;
       }
       const blob = await res.blob();
       const name = fileNameForSave(pageUrl, res.headers.get("content-disposition"));
       const dir = getVfsDirByExt(name);
-      setStatusText(`Document done: ${pageUrl}`);
+      updateTab(tab.id, { statusText: `Document done: ${pageUrl}`, error: null });
       await saveUrlToVfs(pageUrl, dir, { filename: name, mime: blob.type || "text/html" });
-      setError(null);
-    } catch (e: any) {
-      setError(`保存に失敗しました: ${e?.message || String(e)}`);
-      setStatusText("Save failed");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateTab(tab.id, { error: `保存に失敗しました: ${msg}`, statusText: "Save failed" });
     } finally {
       setSaving(false);
     }
   };
 
-  const injectCursorStyles = () => {
-    const iframe = iframeRef.current;
+  const injectCursorStyles = (tabId: string) => {
+    const iframe = iframeEls.current.get(tabId);
     if (!iframe) return;
     let doc: Document | null = null;
     try {
@@ -399,48 +470,49 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     } catch {}
   };
 
-  const handleIframeLoad = () => {
-    setLoading(false);
+  const handleIframeLoad = (tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    const iframe = iframeEls.current.get(tabId);
+    updateTab(tabId, { loading: false });
     // Detect JSON bot-block rendered inside iframe (fallback for race)
     try {
-      const doc = iframeRef.current?.contentDocument;
+      const doc = iframe?.contentDocument;
       if (doc) {
         const txt = doc.body?.innerText || "";
         if (txt.includes("bot blocked") || (txt.includes("If this persists") && txt.includes("anonymized"))) {
-          const q = ddgBlocked?.query || address;
+          const q = tab?.ddgBlocked?.query || tab?.address || "";
           if (q && !isProbablyUrl(q)) {
-            setDdgBlocked({ query: q, code: "anonymized", email: null, originalUrl: currentUrl });
+            updateTab(tabId, { ddgBlocked: { query: q, code: "anonymized", email: null, originalUrl: tab?.currentUrl || "" } });
             const bingUrl = toBingUrl(q);
             setFallbackNotice("DDGブロックを検出 → Bingで代替表示します（Win95窓内）。");
-            setCurrentUrl(bingUrl);
-            setAddress(bingUrl);
+            navigateTo(bingUrl, tabId);
             return;
           }
         }
       }
     } catch {}
-    setStatusText(`互換表示(プロキシ経由): ${currentUrl}`);
-    setError(null);
+    if (tab?.currentUrl) updateTab(tabId, { statusText: `互換表示(プロキシ経由): ${tab.currentUrl}`, error: null });
 
     // Attach link interceptor for VFS downloads (media files, archives, etc.)
-    const cleanupClick = attachVfsLinkInterceptor();
+    const cleanupClick = attachVfsLinkInterceptor(tabId);
     if (cleanupClick) {
-      linkInterceptorRef.current = cleanupClick;
+      try { linkCleanupMap.current.get(tabId)?.(); } catch {}
+      linkCleanupMap.current.set(tabId, cleanupClick);
     }
-    attachIeContextMenu();
-    injectCursorStyles();
+    attachIeContextMenu(tabId);
+    injectCursorStyles(tabId);
   };
 
-  const handleIframeError = () => {
-    setLoading(false);
-    setError("ページの読み込みに失敗しました。別の検索で試してください。");
-    setStatusText("Error loading document");
+  const handleIframeError = (tabId: string) => {
+    updateTab(tabId, { loading: false, error: "ページの読み込みに失敗しました。別の検索で試してください。", statusText: "Error loading document" });
   };
 
   /** iframe内のDLリンク（拡張子ベース）を横取りしてVFSに保存する */
-  const attachVfsLinkInterceptor = useCallback(() => {
-    const iframe = iframeRef.current;
+  const attachVfsLinkInterceptor = useCallback((tabId: string) => {
+    const iframe = iframeEls.current.get(tabId);
     if (!iframe) return;
+    const tab = tabs.find((t) => t.id === tabId);
+    const baseUrl = tab?.currentUrl || "";
     let doc: Document | null = null;
     try {
       doc = iframe.contentDocument;
@@ -458,7 +530,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       e.preventDefault();
       e.stopPropagation();
       try {
-        const absolute = new URL(href, iframe.contentWindow?.location.href || currentUrl).toString();
+        const absolute = new URL(href, iframe.contentWindow?.location.href || baseUrl).toString();
         const name = fileNameForSave(absolute, null);
         const dir = getVfsDirByExt(name);
         saveUrlToVfs(absolute, dir, { filename: name }).catch(() => {
@@ -474,12 +546,14 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       doc.removeEventListener("click", onClick, true);
     };
     return cleanup;
-  }, [currentUrl]);
+  }, [tabs]);
 
   /** iframe内の右クリックを横取りしてWenge内メニューを出す(プロキシ/srcdocは同一オリジンのため介入可) */
-  const attachIeContextMenu = useCallback(() => {
-    const iframe = iframeRef.current;
+  const attachIeContextMenu = useCallback((tabId: string) => {
+    const iframe = iframeEls.current.get(tabId);
     if (!iframe) return;
+    const tab = tabs.find((t) => t.id === tabId);
+    const baseUrl = tab?.currentUrl || "";
     let doc: Document | null = null;
     try {
       doc = iframe.contentDocument;
@@ -489,9 +563,10 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     }
     if (!doc) return;
     // 既存の抑止があれば張り替え
-    if (ctxCleanupRef.current) {
-      try { ctxCleanupRef.current(); } catch {}
-      ctxCleanupRef.current = null;
+    const prevCleanup = ctxCleanupMap.current.get(tabId);
+    if (prevCleanup) {
+      try { prevCleanup(); } catch {}
+      ctxCleanupMap.current.delete(tabId);
     }
     const onCtx = (e: MouseEvent) => {
       e.preventDefault();
@@ -506,7 +581,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           const href = anchor.getAttribute("href");
           if (href && !/^javascript:/i.test(href) && !/^data:/i.test(href)) {
             try {
-              linkUrl = new URL(href, iframe.contentWindow?.location.href || currentUrl).toString();
+              linkUrl = new URL(href, iframe.contentWindow?.location.href || baseUrl).toString();
             } catch { linkUrl = href; }
           }
         }
@@ -514,7 +589,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           const src = img.getAttribute("src") || img.currentSrc;
           if (src && !src.startsWith("data:")) {
             try {
-              imgUrl = new URL(src, iframe.contentWindow?.location.href || currentUrl).toString();
+              imgUrl = new URL(src, iframe.contentWindow?.location.href || baseUrl).toString();
             } catch { imgUrl = src; }
           }
         }
@@ -523,45 +598,37 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           const sel = doc!.getSelection?.()?.toString() || iframe.contentWindow?.getSelection?.()?.toString();
           if (sel && sel.trim()) selText = sel.slice(0, 200);
         } catch {}
-        // clientX/Yはviewport共通座標なのでそのまま親のfixed配置に使える
-        setIeMenu({ x: e.clientX, y: e.clientY, linkUrl, imgUrl, selText });
+        // 仮想画面の論理pxに換算して保持する (仮想画面基準のfixed配置のため)
+        const v = toVirtualPoint(e.clientX, e.clientY);
+        setIeMenu({ x: v.x, y: v.y, linkUrl, imgUrl, selText });
       } catch {
-        setIeMenu({ x: e.clientX, y: e.clientY });
+        const v = toVirtualPoint(e.clientX, e.clientY);
+        setIeMenu({ x: v.x, y: v.y });
       }
     };
     doc.addEventListener("contextmenu", onCtx, true);
-    ctxCleanupRef.current = () => {
+    ctxCleanupMap.current.set(tabId, () => {
       doc.removeEventListener("contextmenu", onCtx, true);
-    };
-  }, [currentUrl]);
+    });
+  }, [tabs]);
 
-  // Clean up link interceptor when navigating
-  const linkInterceptorRef = useRef<(() => void) | null>(null);
+  // ナビゲーション時にそのタブのinterceptorを張り替え + メニューを閉じる
+  const navSig = tabs.map((t) => `${t.id}:${t.currentUrl}:${t.vfsHtml ? t.vfsHtml.length : 0}:${t.reloadKey}`).join("|");
   useEffect(() => {
-    // Remove previous interceptor
-    if (linkInterceptorRef.current) {
-      linkInterceptorRef.current();
-      linkInterceptorRef.current = null;
-    }
-    if (ctxCleanupRef.current) {
-      try { ctxCleanupRef.current(); } catch {}
-      ctxCleanupRef.current = null;
-    }
     setIeMenu(null);
     // Attach new one will happen in handleIframeLoad
-  }, [currentUrl, vfsHtml]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navSig]);
 
   // Cleanup on unmount
   useEffect(() => {
+    const ctxMap = ctxCleanupMap.current;
+    const linkMap = linkCleanupMap.current;
     return () => {
-      if (linkInterceptorRef.current) {
-        linkInterceptorRef.current();
-        linkInterceptorRef.current = null;
-      }
-      if (ctxCleanupRef.current) {
-        try { ctxCleanupRef.current(); } catch {}
-        ctxCleanupRef.current = null;
-      }
+      linkMap.forEach((fn) => { try { fn(); } catch {} });
+      linkMap.clear();
+      ctxMap.forEach((fn) => { try { fn(); } catch {} });
+      ctxMap.clear();
     };
   }, []);
 
@@ -579,9 +646,11 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   }, [ieMenu]);
 
   const copyText = async (text: string, label: string) => {
+    setIeMenu(null);
+    const id = activeTabIdRef.current;
     try {
       await navigator.clipboard.writeText(text);
-      setStatusText(`${label}をコピーしました`);
+      if (id) updateTab(id, { statusText: `${label}をコピーしました` });
     } catch {
       try {
         const ta = document.createElement("textarea");
@@ -590,114 +659,201 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         ta.select();
         document.execCommand("copy");
         ta.remove();
-        setStatusText(`${label}をコピーしました`);
+        if (id) updateTab(id, { statusText: `${label}をコピーしました` });
       } catch {
         showError("Copy", "コピーに失敗しました。");
       }
     }
-    setIeMenu(null);
   };
 
   // IE枠(ツールバー外・iframe外)の右クリックでもWengeメニューを出す
   const handleIeRootContextMenu = (e: React.MouseEvent) => {
     // iframe内はiframe側リスナーが処理する。ここはiframe外の余白用。
     // iframe上では親にバブリングしないため二重表示にはならない。
+    const target = e.target as HTMLElement | null;
+    if (target?.closest?.("[data-ie-iframe-layer]")) return;
     e.preventDefault();
-    setIeMenu({ x: e.clientX, y: e.clientY });
+    const v = toVirtualPoint(e.clientX, e.clientY);
+    setIeMenu({ x: v.x, y: v.y });
   };
 
   // Fix cursor reset when IE is active - prevent global cursor from overriding
   useEffect(() => {
-    if (!currentUrl) return;
-    
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    
-    const mouseLeaveHandler = (e: MouseEvent) => {
-      // If mouse is leaving the iframe and there's no custom cursor on the iframe,
-      // the global cursor hook might try to reset it, which could cause issues
-      if (e.relatedTarget && !(e.relatedTarget as Element).closest('iframe')) {
-        // Check if IE's injected cursor styles are still in the iframe
-        try {
-          const doc = iframe.contentDocument;
-          if (doc) {
-            const style = doc.getElementById('w95-iframe-cursors');
-            if (!style) {
-              // Re-inject the cursor styles if they were removed
-              injectCursorStyles();
-            }
-          }
-        } catch {}
-      }
-    };
-    
-    iframe.addEventListener('mouseleave', mouseLeaveHandler);
-    
-    return () => {
-      iframe.removeEventListener('mouseleave', mouseLeaveHandler);
-    };
-  }, [currentUrl, injectCursorStyles, iframeRef]);
+    tabs.forEach((t) => {
+      if (!t.currentUrl) return;
+      const iframe = iframeEls.current.get(t.id);
+      if (!iframe) return;
+      try {
+        const doc = iframe.contentDocument;
+        if (doc && !doc.getElementById("w95-iframe-cursors")) {
+          injectCursorStyles(t.id);
+        }
+      } catch {}
+    });
+  }, [navSig]);
 
-  const canBack = hIndex > 0;
-  const canForward = hIndex < historyStack.length - 1;
+  // w95カーソルのちらつき防止: iframe内外の出入りのたびに安全な既定に戻す
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      if (el.closest?.("[data-ie-iframe-layer]")) return;
+      const anyLoading = tabs.some((x) => x.loading);
+      if (!anyLoading && ieRootRef.current) ieRootRef.current.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMouseMove, true);
+    return () => window.removeEventListener("mousemove", onMouseMove, true);
+  }, [tabs]);
+
+  useEffect(() => {
+    const onLeave = () => { if (ieRootRef.current) ieRootRef.current.style.cursor = ""; };
+    const root = ieRootRef.current;
+    root?.addEventListener("mouseleave", onLeave);
+    return () => { root?.removeEventListener("mouseleave", onLeave); };
+  }, []);
+
+  const canBack = (activeTab?.hIndex ?? -1) > 0;
+  const canForward = activeTab ? activeTab.hIndex < activeTab.historyStack.length - 1 : false;
 
   const handleFallbackBing = () => {
-    if (!ddgBlocked) return;
-    const bingUrl = toBingUrl(ddgBlocked.query);
-    setFallbackNotice(`Bingで再検索: ${ddgBlocked.query}`);
-    navigateTo(bingUrl);
+    if (!activeTab?.ddgBlocked) return;
+    const bingUrl = toBingUrl(activeTab.ddgBlocked.query);
+    setFallbackNotice(`Bingで再検索: ${activeTab.ddgBlocked.query}`);
+    navigateTo(bingUrl, activeTab.id);
   };
   const handleFallbackWiki = () => {
-    if (!ddgBlocked) return;
-    const wikiUrl = toWikipediaUrl(ddgBlocked.query);
-    setFallbackNotice(`Wikipediaで検索: ${ddgBlocked.query}`);
-    navigateTo(wikiUrl);
+    if (!activeTab?.ddgBlocked) return;
+    const wikiUrl = toWikipediaUrl(activeTab.ddgBlocked.query);
+    setFallbackNotice(`Wikipediaで検索: ${activeTab.ddgBlocked.query}`);
+    navigateTo(wikiUrl, activeTab.id);
   };
   const handleRetryDdg = async () => {
-    const q = ddgBlocked?.query || address.trim();
-    if (!q || isProbablyUrl(q)) return;
+    const tab = activeTab;
+    const q = tab?.ddgBlocked?.query || tab?.address.trim() || "";
+    if (!tab || !q || isProbablyUrl(q)) return;
     // DDGを明示的に試す（失敗時はproxyが502を返し、checkで検出してBingに留まる）
     const ddgUrl = toDuckDuckGoUrl(q);
     const proxyUrl = `/api/proxy?url=${encodeURIComponent(ddgUrl)}`;
     setFallbackNotice(`DDGを再試行中: ${q}...`);
     const check = await checkDdgBlocked(proxyUrl);
     if (check.blocked) {
-      setDdgBlocked({ query: q, code: check.code, email: check.email, originalUrl: ddgUrl });
+      updateTab(tab.id, { ddgBlocked: { query: q, code: check.code, email: check.email, originalUrl: ddgUrl } });
       setFallbackNotice(`DDGは依然ブロック中 (code: ${check.code || "anonymized"})。Bingで継続します。`);
       return;
     }
-    setDdgBlocked(null);
+    updateTab(tab.id, { ddgBlocked: null });
     setFallbackNotice(`DDGで表示: ${q}`);
-    navigateTo(ddgUrl);
+    navigateTo(ddgUrl, tab.id);
+  };
+
+  const anyLoading = tabs.some((t) => t.loading);
+
+  // ---- tab shortcuts: Ctrl+T / Ctrl+W / Ctrl+Tab ----
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "t") { e.preventDefault(); e.stopPropagation(); addTab(); }
+      else if (k === "w") { e.preventDefault(); e.stopPropagation(); if (activeTabIdRef.current) closeTab(activeTabIdRef.current); }
+      else if (e.key === "Tab") {
+        e.preventDefault(); e.stopPropagation();
+        const dir = e.shiftKey ? -1 : 1;
+        setTabs((prev) => {
+          if (prev.length <= 1) return prev;
+          const idx = prev.findIndex((t) => t.id === activeTabIdRef.current);
+          const next = prev[(idx + dir + prev.length) % prev.length];
+          if (next) { setActiveId(next.id); activeTabIdRef.current = next.id; }
+          return prev;
+        });
+        setIeMenu(null);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [addTab, closeTab]);
+
+  // VFS HTML (srcdoc) 表示: 完全保持のため各iframeに個別設定
+  useEffect(() => {
+    tabs.forEach((t) => {
+      if (!t.vfsHtml) return;
+      const iframe = iframeEls.current.get(t.id);
+      if (iframe && iframe.srcdoc !== t.vfsHtml) iframe.srcdoc = t.vfsHtml;
+    });
+  }, [tabs]);
+
+  const activeError: string | null = activeTab?.error ?? null;
+  const activeDdg = activeTab?.ddgBlocked ?? null;
+
+  const selectTab = (id: string) => {
+    setActiveId(id);
+    activeTabIdRef.current = id;
+    setIeMenu(null);
+    setFallbackNotice(null);
   };
 
   return (
-    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} className={loading ? "w95-ie-loading" : undefined} style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
+    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} className={anyLoading ? "w95-ie-loading" : undefined} style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 2, overflowX: "auto", padding: "2px 2px 0", background: "#008080" }}>
+        {tabs.map((t) => {
+          const isActive = t.id === activeTabId;
+          return (
+            <div
+              key={t.id}
+              onClick={() => selectTab(t.id)}
+              title={t.vfsName || t.currentUrl || "空白ページ"}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                maxWidth: 160, minWidth: 60, padding: "3px 4px 3px 6px",
+                fontSize: 11, whiteSpace: "nowrap",
+                background: isActive ? "#c0c0c0" : "#808080",
+                color: isActive ? "#000" : "#fff",
+                borderTop: "2px outset #fff", borderLeft: "2px outset #fff", borderRight: "2px outset #fff",
+                borderBottom: isActive ? "none" : "2px solid #c0c0c0",
+                cursor: "url('/cursors/hand.png') 12 0, pointer", userSelect: "none",
+              }}
+            >
+              {t.loading && <span style={{ fontSize: 10 }}>⏳</span>}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{t.title}</span>
+              <span
+                onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
+                title="タブを閉じる (Ctrl+W)"
+                style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  width: 14, height: 12, padding: 0,
+                  background: "#c0c0c0",
+                  borderTop: "1px solid #fff", borderLeft: "1px solid #fff",
+                  borderRight: "1px solid #808080", borderBottom: "1px solid #808080",
+                  boxShadow: "inset -1px -1px 0 #404040, inset 1px 1px 0 #dfdfdf",
+                  imageRendering: "pixelated",
+                }}
+              ><CloseGlyph size={8} /></span>
+            </div>
+          );
+        })}
+        <Button size="sm" onClick={() => addTab()} title="新しいタブ (Ctrl+T)" style={{ flexShrink: 0, marginBottom: 1 }}>+</Button>
+      </div>
       <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
-        <Button size="sm" disabled={!canBack} onClick={goBack}>◀ Back</Button>
-        <Button size="sm" disabled={!canForward} onClick={goForward}>▶ Forward</Button>
-        <Button size="sm" onClick={handleRefresh} disabled={!currentUrl}>Refresh</Button>
-        <Button size="sm" onClick={handleStop} disabled={!loading}>Stop</Button>
-        <TextInput value={address} onChange={(e) => setAddress(e.target.value)} onKeyDown={handleAddressKeyDown} placeholder="URL または検索ワード (例: wenge / example.com)" style={{ flex: 1, minWidth: 160 }} />
-        <Button onClick={handleGo} disabled={loading}>Go</Button>
-        <Button size="sm" onClick={handleSave} disabled={saving || (!currentUrl && !address.trim())} title="このページをWenge内に保存">Wenge保存</Button>
+        <Button size="sm" disabled={!canBack} onClick={() => goBack()}>◀ Back</Button>
+        <Button size="sm" disabled={!canForward} onClick={() => goForward()}>▶ Forward</Button>
+        <Button size="sm" onClick={() => handleRefresh()} disabled={!activeTab?.currentUrl}>Refresh</Button>
+        <Button size="sm" onClick={() => handleStop()} disabled={!activeTab?.loading}>Stop</Button>
+        <TextInput value={activeTab?.address ?? ""} onChange={(e) => { if (activeTabId) updateTab(activeTabId, { address: e.target.value }); }} onKeyDown={handleAddressKeyDown} placeholder="URL または検索ワード (例: wenge / example.com)" style={{ flex: 1, minWidth: 160 }} />
+        <Button onClick={handleGo} disabled={activeTab?.loading} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer" }}>Go</Button>
+        <Button size="sm" onClick={handleSave} disabled={saving || (!activeTab?.currentUrl && !activeTab?.address.trim())} title="このページをWenge内に保存">Wenge保存</Button>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 10, color: "#808080" }}>via /api/proxy (全サイト互換表示)</span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
-        </div>
+        <span style={{ fontSize: 10, color: "#808080" }}>via /api/proxy (全サイト互換表示)・全タブ保持</span>
       </div>
 
-      {loading && <ProgressBar value={60} style={{ height: 12 }} />}
+      {anyLoading && activeTab?.loading && <ProgressBar value={60} style={{ height: 12 }} />}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
         <span style={{ fontWeight: "bold" }}>お気に入り:</span>
         {QUICK_LINKS.map((u) => (
-          <Anchor key={u} onClick={() => navigateTo(u)} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 11 }}>{u.replace("https://", "")}</Anchor>
+          <Anchor key={u} onClick={() => { if (activeTabId) navigateTo(u, activeTabId); }} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 11 }}>{u.replace("https://", "")}</Anchor>
         ))}
-        <Anchor onClick={() => navigateTo("https://www.wenge.co.jp/")} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 11 }}>wenge.co.jp</Anchor>
+        <Anchor onClick={() => { if (activeTabId) navigateTo("https://www.wenge.co.jp/", activeTabId); }} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer", fontSize: 11 }}>wenge.co.jp</Anchor>
       </div>
 
       {fallbackNotice && (
@@ -707,14 +863,14 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         </Frame>
       )}
 
-      {ddgBlocked && (
+      {activeDdg && (
         <Frame variant="well" style={{ background: "#c0c0c0", padding: 8, display: "flex", flexDirection: "column", gap: 6, border: "2px inset #fff" }}>
           <div style={{ fontSize: 11, fontWeight: "bold", color: "#000080", display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 14 }}>⚠</span> DuckDuckGo が一時的にブロックされました
-            {ddgBlocked.code && <span style={{ fontWeight: "normal", color: "#800000", fontSize: 10 }}>code: {ddgBlocked.code.slice(0, 40)}</span>}
+            {activeDdg.code && <span style={{ fontWeight: "normal", color: "#800000", fontSize: 10 }}>code: {activeDdg.code.slice(0, 40)}</span>}
           </div>
           <div style={{ fontSize: 11, color: "#000", lineHeight: 1.4, background: "#fff", border: "2px inset #fff", padding: 6 }}>
-            検索 <b>{ddgBlocked.query}</b> は DuckDuckGo 側のボット判定（<code>If this persists… anonymized</code>）でブロックされました。<br />
+            検索 <b>{activeDdg.query}</b> は DuckDuckGo 側のボット判定（<code>If this persists… anonymized</code>）でブロックされました。<br />
             VercelのデータセンターIP/TLSが原因で、ヘッダ偽装だけでは回避できない場合があります。<br />
             <b>Win95窓内で代替検索を表示しています。</b> 外部ブラウザには遷移しません。
           </div>
@@ -722,62 +878,68 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
             <Button size="sm" onClick={handleRetryDdg}>DDGを再試行</Button>
             <Button size="sm" onClick={handleFallbackBing}>Bingで検索（窓内）</Button>
             <Button size="sm" onClick={handleFallbackWiki}>Wikipediaで検索（窓内）</Button>
-            <Button size="sm" onClick={() => { setDdgBlocked(null); setFallbackNotice(null); }}>閉じる</Button>
+            <Button size="sm" onClick={() => { if (activeTabId) updateTab(activeTabId, { ddgBlocked: null }); setFallbackNotice(null); }}>閉じる</Button>
           </div>
           <div style={{ fontSize: 10, color: "#808080" }}>現在は Bing 結果をプロキシ経由で表示中。アドレスバーのURLは窓内で切り替え可能です。</div>
         </Frame>
       )}
 
-      {error && !ddgBlocked && (
+      {activeError && !activeDdg && (
         <Frame variant="well" style={{ background: "#ffffe1", padding: "6px 8px", fontSize: 11, color: "#800000", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <span>⚠ {error}</span>
-          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-            <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
-          </div>
+          <span>⚠ {activeError}</span>
         </Frame>
       )}
 
       <div style={{ flex: 1, minHeight: 260, background: "#fff", border: "2px inset #fff", padding: 2, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {(currentUrl || vfsHtml) ? (
-          <div style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden", display: "flex" }}>
-            <iframe
-              key={`${iframeSrc}::${reloadKey}::${hIndex}::proxy`}
-              ref={iframeRef}
-              src={iframeSrc}
-              title="Wenge IE"
-              sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
-              allow="fullscreen; autoplay; clipboard-read; clipboard-write"
-              style={{ width: "100%", height: "100%", border: "none", background: "#fff" }}
-              onLoad={handleIframeLoad}
-              onError={handleIframeError}
-            />
-            {loading && (
-              <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.85)", display: "grid", placeItems: "center", fontSize: 11, color: "#000080", flexDirection: "column", gap: 6 }}>
-                <div>Loading {currentUrl}...</div>
-                {ddgBlocked && <div style={{ fontSize: 10, color: "#808080" }}>DDGブロック検出時はBingに自動切替します</div>}
+        <div data-ie-iframe-layer style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden" }}>
+          {tabs.map((t) => {
+            const isActive = t.id === activeTabId;
+            const hasContent = !!(t.currentUrl || t.vfsHtml);
+            if (!hasContent) {
+              return isActive ? (
+                <div key={t.id} style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "#008080", padding: 16, textAlign: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: "bold", color: "#fff", textShadow: "1px 1px 0 #000" }}>Internet Explorer</div>
+                  <div style={{ fontSize: 11, color: "#fff", textShadow: "1px 1px 0 #000", lineHeight: 1.5 }}>
+                    Enter URL or search word and click <b>Go</b> or press <b>Enter</b> to open.<br />
+                    Search words are displayed in Bing window.
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                    <Button size="sm" onClick={() => navigateTo("https://www.bing.com/", t.id)} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer" }}>Bing Home</Button>
+                    <Button size="sm" onClick={() => navigateTo("https://ja.wikipedia.org/", t.id)} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer" }}>Wikipedia</Button>
+                    <Button size="sm" onClick={() => navigateTo("https://example.com", t.id)} style={{ cursor: "url('/cursors/hand.png') 12 0, pointer" }}>example.com</Button>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#c0c0c0", textShadow: "1px 1px 0 #000" }}>Tip: Enter example.com</div>
+                </div>
+              ) : null;
+            }
+            return (
+              <div key={t.id} style={{ position: "absolute", inset: 0, display: isActive ? "flex" : "none", background: "#fff" }}>
+                <iframe
+                  key={`${t.id}::${t.reloadKey}::${t.hIndex}::proxy`}
+                  ref={setIframeEl(t.id)}
+                  src={iframeSrcFor(t)}
+                  title={`Wenge IE ${t.title}`}
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
+                  allow="fullscreen; autoplay; clipboard-read; clipboard-write"
+                  style={{ width: "100%", height: "100%", border: "none", background: "#fff" }}
+                  onLoad={() => handleIframeLoad(t.id)}
+                  onError={() => handleIframeError(t.id)}
+                />
+                {t.loading && isActive && (
+                  <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.85)", display: "grid", placeItems: "center", fontSize: 11, color: "#000080", gap: 6 }}>
+                    <div>Loading {t.currentUrl}...</div>
+                    {t.ddgBlocked && <div style={{ fontSize: 10, color: "#808080" }}>DDGブロック検出時はBingに自動切替します</div>}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "#008080", padding: 16, textAlign: "center" }}>
-            <div style={{ fontSize: 13, fontWeight: "bold", color: "#fff", textShadow: "1px 1px 0 #000" }}>Internet Explorer</div>
-            <div style={{ fontSize: 11, color: "#fff", textShadow: "1px 1px 0 #000", lineHeight: 1.5 }}>
-              Enter URL or search word and click <b>Go</b> or press <b>Enter</b> to open.<br />
-              Search words are displayed in Bing window.
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
-              <Button size="sm" onClick={() => navigateTo("https://www.bing.com/")}>Bing Home</Button>
-              <Button size="sm" onClick={() => navigateTo("https://ja.wikipedia.org/")}>Wikipedia</Button>
-              <Button size="sm" onClick={() => navigateTo("https://example.com")}>example.com</Button>
-            </div>
-            <div style={{ fontSize: 10, color: "#c0c0c0", textShadow: "1px 1px 0 #000" }}>Tip: Enter example.com</div>
-          </div>
-        )}
+            );
+          })}
+        </div>
       </div>
 
       <div style={{ fontSize: 11, background: "#c0c0c0", border: "2px inset", padding: "2px 6px", display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentUrl ? statusText : "準備完了"}</span>
-        <span style={{ flexShrink: 0, color: "#808080" }}>{currentUrl ? "Proxy" : "0 pages"} | {historyStack.length} pages</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeTab?.currentUrl ? activeTab.statusText : "準備完了"}</span>
+        <span style={{ flexShrink: 0, color: "#808080" }}>{activeTab?.currentUrl ? "Proxy" : "0 pages"} | {activeTab ? activeTab.historyStack.length : 0} pages | {tabs.length} tabs</span>
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}></div>
@@ -796,15 +958,17 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
               // カーソルの右側に開く (実機同様)。右端・下端では画面内に収まるよう反転する。
               left: (() => {
                 const w = 264;
+                const vw = getViewMetrics().w || window.innerWidth;
                 const right = ieMenu.x + 2;
-                if (right + w <= window.innerWidth) return Math.max(4, right);
+                if (right + w <= vw) return Math.max(4, right);
                 return Math.max(4, ieMenu.x - w);
               })(),
               top: (() => {
                 const h = 330;
+                const vh = getViewMetrics().h || window.innerHeight;
                 const below = ieMenu.y + 2;
-                if (below + h <= window.innerHeight) return Math.max(4, below);
-                return Math.max(4, window.innerHeight - h);
+                if (below + h <= vh) return Math.max(4, below);
+                return Math.max(4, vh - h);
               })(),
               zIndex: 9991,
               minWidth: 210,
@@ -829,7 +993,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
                 ▶ 進む
               </MenuListItem>
               <MenuListItem
-                disabled={!currentUrl && !vfsHtml}
+                disabled={!activeTab?.currentUrl && !activeTab?.vfsHtml}
                 onClick={() => { setIeMenu(null); handleRefresh(); }}
                 style={{ fontSize: 11 }}
               >
@@ -838,10 +1002,10 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
               <Separator />
               {ieMenu.linkUrl && (
                 <MenuListItem
-                  onClick={() => { const u = ieMenu.linkUrl!; setIeMenu(null); navigateTo(u); }}
+                  onClick={() => { const u = ieMenu.linkUrl!; setIeMenu(null); addTab(u); }}
                   style={{ fontSize: 11 }}
                 >
-                  新しいウィンドウで開く (Wenge IE)
+                  新しいタブで開く (Wenge IE)
                 </MenuListItem>
               )}
               {ieMenu.linkUrl && (
@@ -874,31 +1038,31 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
                   選択文字をコピー
                 </MenuListItem>
               )}
-              {!ieMenu.linkUrl && currentUrl && (
-                <MenuListItem onClick={() => copyText(currentUrl, "ページURL")} style={{ fontSize: 11 }}>
+              {!ieMenu.linkUrl && activeTab?.currentUrl && (
+                <MenuListItem onClick={() => copyText(activeTab.currentUrl, "ページURL")} style={{ fontSize: 11 }}>
                   ページのURLをコピー
                 </MenuListItem>
               )}
-              {(ieMenu.linkUrl || ieMenu.imgUrl || ieMenu.selText || currentUrl) && <Separator />}
+              {(ieMenu.linkUrl || ieMenu.imgUrl || ieMenu.selText || activeTab?.currentUrl) && <Separator />}
               <MenuListItem
-                disabled={saving || (!currentUrl && !address.trim() && !ieMenu.linkUrl)}
+                disabled={saving || (!activeTab?.currentUrl && !activeTab?.address.trim() && !ieMenu.linkUrl)}
                 onClick={() => {
                   if (ieMenu.linkUrl) {
                     const u = ieMenu.linkUrl;
                     setIeMenu(null);
                     const name = fileNameForSave(u, null);
                     setSaving(true);
-                    setStatusText(`Saving ${u} → Wenge...`);
+                    if (activeTabId) updateTab(activeTabId, { statusText: `Saving ${u} → Wenge...` });
                     fetch(`/api/proxy?url=${encodeURIComponent(u)}`)
                       .then(async (res) => {
                         if (!res.ok) throw new Error(`HTTP ${res.status}`);
                         const blob = await res.blob();
                         await saveUrlToVfs(u, getVfsDirByExt(name), { filename: name, mime: blob.type || "text/html" });
-                        setStatusText(`Document done: ${u}`);
+                        if (activeTabId) updateTab(activeTabId, { statusText: `Document done: ${u}` });
                       })
                       .catch((e: unknown) => {
                         const msg = e instanceof Error ? e.message : String(e);
-                        setError(`保存に失敗しました: ${msg}`);
+                        if (activeTabId) updateTab(activeTabId, { error: `保存に失敗しました: ${msg}` });
                       })
                       .finally(() => setSaving(false));
                   } else {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import styled from "styled-components";
 import { Button, Checkbox, Radio, Window, WindowHeader, WindowContent } from "react95";
+import { CloseGlyph } from "./CaptionGlyphs";
 
 export type SystemDialogKind = "error" | "confirm" | "info" | "download-choice";
 
@@ -99,7 +100,7 @@ export function useSystemDialogs(): SystemDialogRequest[] {
 }
 
 const Overlay = styled.div`
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 12000;
   display: grid;
@@ -182,13 +183,15 @@ export function SystemDialogs() {
     else settle(top.id, false);
   };
   return (
-    <Overlay onMouseDown={(e) => { if (e.target === e.currentTarget && top.kind !== "error") cancelTop(); }}>
+    <Overlay data-system-dialog onMouseDown={(e) => { if (e.target === e.currentTarget && top.kind !== "error") cancelTop(); }}>
       <DialogWindow>
         <WindowHeader style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{top.title}</span>
           {top.kind !== "error" && (
-            <Button square size="sm" onClick={cancelTop}>
-              <span>×</span>
+            <Button square size="sm" onClick={cancelTop} title="閉じる">
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <CloseGlyph size={10} />
+              </span>
             </Button>
           )}
         </WindowHeader>

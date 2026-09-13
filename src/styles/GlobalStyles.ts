@@ -38,16 +38,18 @@ const GlobalStyle = createGlobalStyle`
     cursor: url('/cursors/hand.png') 12 0, pointer;
   }
   /* react95内製コンポーネント (Button/Select/TreeView/Switch等) が
-     cursor: pointer を内部指定しているため、カスタムhandで上書き */
+      cursor: pointer を内部指定しているため、カスタムhandで上書き。
+      styled-componentsはグローバルCSSより後ろに注入されるため、
+      通常の詳細度では上書きできない。!importantで強制する。 */
   button, a, [role="button"], select, summary,
   [class*="Button"], [class*="Select"], [class*="Tab"], [class*="Tree"] {
-    cursor: url('/cursors/hand.png') 12 0, pointer;
+    cursor: url('/cursors/hand.png') 12 0, pointer !important;
   }
   button *, a *, [role="button"] * {
     cursor: inherit;
   }
   input[type="text"], input[type="password"], input[type="search"], textarea, [contenteditable="true"] {
-    cursor: url('/cursors/beam.png') 10 12, text;
+    cursor: url('/cursors/beam.png') 14 16, text;
   }
   /* Crosshair for Paint canvas etc. will be overridden inline, but provide global fallback */
   .w95-crosshair, canvas {
@@ -61,6 +63,16 @@ const GlobalStyle = createGlobalStyle`
   }
   .w95-move {
     cursor: url('/cursors/move.png') 16 16, move;
+  }
+  /* Explorer -> Desktop などのファイルDnD中は move_hand.png にする。
+     HTML5 DnD中はOSがカーソルを上書きしがちなため body 付与クラスで全体を強制する。 */
+  .wenge-dragging, .wenge-dragging * {
+    cursor: url('/cursors/move_hand.png') 8 8, move !important;
+  }
+  /* Pointer DnD中のドロップ先ホバー強調 */
+  .wenge-drop-hover {
+    outline: 2px dashed #000080 !important;
+    outline-offset: -2px;
   }
   .w95-busy, .w95-busy * {
     cursor: url('/cursors/wait.png') 16 16, wait !important;

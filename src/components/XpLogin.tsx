@@ -159,6 +159,9 @@ const LoginBox = styled.div<{ $shakeKey: number }>`
 const LoginLabel = styled.label`
   color: #fff;
   font-size: 12px;
+  /* ログイン画面はarrow.pngカーソルを基本とする。ラベル上でビームカーソルが
+     表示されてしまうのを防ぐため、親のScreenカーソルを継承させる。 */
+  cursor: inherit;
 `;
 
 const LoginRow = styled.div`

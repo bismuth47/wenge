@@ -78,15 +78,15 @@ export function ChatApp() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%" }}>
-      <Fieldset label="Wenge Chat - Vercel + Turso + Pusher">
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, height: "100%", minHeight: 0, flex: 1, boxSizing: "border-box" }}>
+      <Fieldset label="Wenge Chat - Vercel + Turso + Pusher" style={{ flexShrink: 0 }}>
         <div style={{ fontSize: 10, lineHeight: 1.4, color: "#333" }}>
           Send → Vercel API → Turso save + Pusher notify → Broadcast to all clients
           <br />
           Env vars: <code>TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, PUSHER_APP_ID, PUSHER_KEY, PUSHER_SECRET, PUSHER_CLUSTER</code>
         </div>
       </Fieldset>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
         <TextInput value={user} onChange={(e) => setUser(e.target.value)} placeholder="Name" width={120} />
         <span style={{ fontSize: 11, alignSelf: "center" }}>online</span>
       </div>
@@ -95,7 +95,8 @@ export function ChatApp() {
         style={{
           border: "2px inset #fff",
           background: "#fff",
-          height: 180,
+          flex: 1,
+          minHeight: 120,
           overflow: "auto",
           padding: 6,
           fontSize: 12,
@@ -114,7 +115,7 @@ export function ChatApp() {
           ))
         )}
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
         <TextInput value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Type a message..." style={{ flex: 1 }} />
         <Button onClick={send}>Send</Button>
       </div>
