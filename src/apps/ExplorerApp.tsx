@@ -329,8 +329,30 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
     if (!list || list.length === 0 || r2Prefix === null) return;
     setR2Busy("Uploading...");
     try {
-      for (const f of Array.from(list)) {
-        await uploadToR2(r2Prefix, f);
+      const filesToUpload = Array.from(list);
+      const folderSet = new Set<string>();
+      for (const file of filesToUpload) {
+        const filePath = file.webkitRelativePath || file.name;
+        const parts = filePath.split('/');
+        let cur = r2Prefix;
+        for (let i = 0; i < parts.length - 1; i++) {
+          cur += parts[i] + '/';
+          folderSet.add(cur);
+        }
+      }
+      await Promise.allSettled([...folderSet].map((folderPath) => {
+        const folderName = folderPath.slice(r2Prefix.length).replace(/^\//, '');
+        return createR2Folder(r2Prefix, folderName);
+      }));
+      for (const file of filesToUpload) {
+        const filePath = file.webkitRelativePath || file.name;
+        const parts = filePath.split('/');
+        let fullKey = r2Prefix;
+        for (let j = 0; j < parts.length; j++) {
+          fullKey += parts[j];
+          if (j !== parts.length - 1) fullKey += '/';
+        }
+        await uploadToR2(fullKey, file);
       }
       await refreshR2(r2Prefix);
     } catch (e: any) {
@@ -895,7 +917,7 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
           <Button size="sm" onClick={() => refreshR2(r2Prefix!)} disabled={r2Loading}>Refresh</Button>
           <Button size="sm" onClick={() => fileRef.current?.click()} disabled={!!r2Busy}>Upload...</Button>
-          <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={(e) => onUploadFiles(e.target.files)} />
+          <input ref={fileRef} type="file" multiple webkitdirectory directory mozdirectory style={{ display: "none" }} onChange={(e) => onUploadFiles(e.target.files)} />
           <Button size="sm" onClick={() => setMkdirOpen((v) => !v)} disabled={!!r2Busy}>New Folder...</Button>
           <Button size="sm" onClick={onDeleteSelected} disabled={!selected || !!r2Busy}>Delete</Button>
           <Button size="sm" onClick={() => { if (selected?.startsWith("r2f:")) openR2Entry(selected.slice(4)); }} disabled={!selected?.startsWith("r2f:") || !!r2Busy}>Open</Button>
