@@ -295,7 +295,7 @@ export default async function handler(req: any, res: any) {
 
     const baseHref = upstream.url || fetchUrl || target;
     const baseTag = `<base href="${baseHref}">`;
-    const antiBustScript = `<script>try{window.top=window.self;window.parent=window.self;Object.defineProperty(window,'top',{get:()=>window.self,configurable:true});Object.defineProperty(window,'parent',{get:()=>window.self,configurable:true});}catch(e){}</script>`;
+    const antiBustScript = `<script>try{window.top=window.self;window.parent=window.self;Object.defineProperty(window,'top',{get:()=>window.self,configurable:true});Object.defineProperty(window,'parent',{get:()=>window.self,configurable:true});}catch(e){}try{document.addEventListener('contextmenu',function(e){e.preventDefault();e.stopPropagation();},true);document.addEventListener('DOMContentLoaded',function(){try{document.addEventListener('contextmenu',function(e){e.preventDefault();e.stopPropagation();},true);}catch(e){}});}catch(e){}</script>`;
     if (/<head[^>]*>/i.test(html)) {
       html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${baseTag}\n${antiBustScript}`);
     } else if (/<html[^>]*>/i.test(html)) {

@@ -1450,6 +1450,9 @@ const isOverRecycleAt=(clientX:number,clientY:number)=>{
   };
 
   const handleDesktopContextMenu=(e: React.MouseEvent)=>{
+    const target = e.target as HTMLElement;
+    // Window内(IE含む)は各窓に任せ、デスクトップメニューを出さない
+    if(target.closest("[data-window]") || target.closest("[data-context-menu]")){ e.preventDefault(); return; }
     e.preventDefault();
     setContextMenu({x:e.clientX, y:e.clientY});
   };

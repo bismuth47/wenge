@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, TextInput, ProgressBar, Anchor, Checkbox, Frame } from "react95";
+import { Button, TextInput, ProgressBar, Anchor, Frame, MenuList, MenuListItem, Separator } from "react95";
 import { showError } from "../components/SystemDialog";
 import { getVfsDirByExt } from "../lib/downloadTarget";
 import { saveUrlToVfs } from "../lib/vfs/download";
@@ -89,6 +89,12 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   const [saving, setSaving] = useState(false);
   const [vfsHtml, setVfsHtml] = useState<string | null>(null);
   const blobUrlRef = useRef<string | null>(null);
+
+  // Wenge内右クリックメニュー (Win95風)。iframe内のcontextmenuを横取りして表示する。
+  type IeMenuState = { x: number; y: number; linkUrl?: string | null; imgUrl?: string | null; selText?: string | null };
+  const [ieMenu, setIeMenu] = useState<IeMenuState | null>(null);
+  const ieRootRef = useRef<HTMLDivElement>(null);
+  const ctxCleanupRef = useRef<(() => void) | null>(null);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const probeAbortRef = useRef<AbortController | null>(null);
@@ -448,7 +454,11 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     setError(null);
 
     // Attach link interceptor for VFS downloads (media files, archives, etc.)
-    attachVfsLinkInterceptor();
+    const cleanupClick = attachVfsLinkInterceptor();
+    if (cleanupClick) {
+      linkInterceptorRef.current = cleanupClick;
+    }
+    attachIeContextMenu();
     injectCursorStyles();
   };
 
@@ -502,6 +512,65 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     return cleanup;
   }, [currentUrl]);
 
+  /** iframe内の右クリックを横取りしてWenge内メニューを出す(同一オリジン=プロキシ/srcdoc時のみ有効) */
+  const attachIeContextMenu = useCallback(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    let doc: Document | null = null;
+    try {
+      doc = iframe.contentDocument;
+    } catch {
+      // クロスオリジン(direct表示)では介入不可 → 実機メニューが出る。プロキシ表示を使うこと。
+      return;
+    }
+    if (!doc) return;
+    // 既存の抑止があれば張り替え
+    if (ctxCleanupRef.current) {
+      try { ctxCleanupRef.current(); } catch {}
+      ctxCleanupRef.current = null;
+    }
+    const onCtx = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const el = e.target as Element | null;
+        const anchor = el?.closest?.("a[href]") as HTMLAnchorElement | null;
+        const img = el?.closest?.("img") as HTMLImageElement | null;
+        let linkUrl: string | null = null;
+        let imgUrl: string | null = null;
+        if (anchor) {
+          const href = anchor.getAttribute("href");
+          if (href && !/^javascript:/i.test(href) && !/^data:/i.test(href)) {
+            try {
+              linkUrl = new URL(href, iframe.contentWindow?.location.href || currentUrl).toString();
+            } catch { linkUrl = href; }
+          }
+        }
+        if (img) {
+          const src = img.getAttribute("src") || img.currentSrc;
+          if (src && !src.startsWith("data:")) {
+            try {
+              imgUrl = new URL(src, iframe.contentWindow?.location.href || currentUrl).toString();
+            } catch { imgUrl = src; }
+          }
+        }
+        let selText: string | null = null;
+        try {
+          const sel = doc!.getSelection?.()?.toString() || iframe.contentWindow?.getSelection?.()?.toString();
+          if (sel && sel.trim()) selText = sel.slice(0, 200);
+        } catch {}
+        // clientX/Yはviewport共通座標なのでそのまま親のfixed配置に使える
+        setIeMenu({ x: e.clientX, y: e.clientY, linkUrl, imgUrl, selText });
+      } catch {
+        setIeMenu({ x: e.clientX, y: e.clientY });
+      }
+    };
+    doc.addEventListener("contextmenu", onCtx, true);
+    ctxCleanupRef.current = () => {
+      doc.removeEventListener("contextmenu", onCtx, true);
+    };
+  }, [currentUrl]);
+
   // Clean up link interceptor when navigating
   const linkInterceptorRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -510,8 +579,13 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       linkInterceptorRef.current();
       linkInterceptorRef.current = null;
     }
+    if (ctxCleanupRef.current) {
+      try { ctxCleanupRef.current(); } catch {}
+      ctxCleanupRef.current = null;
+    }
+    setIeMenu(null);
     // Attach new one will happen in handleIframeLoad
-  }, [currentUrl]);
+  }, [currentUrl, vfsHtml]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -520,8 +594,53 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         linkInterceptorRef.current();
         linkInterceptorRef.current = null;
       }
+      if (ctxCleanupRef.current) {
+        try { ctxCleanupRef.current(); } catch {}
+        ctxCleanupRef.current = null;
+      }
     };
   }, []);
+
+  // メニュー表示中の dismiss (Esc / リサイズ)
+  useEffect(() => {
+    if (!ieMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIeMenu(null); };
+    const onResize = () => setIeMenu(null);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [ieMenu]);
+
+  const copyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatusText(`${label}をコピーしました`);
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        setStatusText(`${label}をコピーしました`);
+      } catch {
+        showError("Copy", "コピーに失敗しました。");
+      }
+    }
+    setIeMenu(null);
+  };
+
+  // IE枠(ツールバー外・iframe外)の右クリックでもWengeメニューを出す
+  const handleIeRootContextMenu = (e: React.MouseEvent) => {
+    // iframe内はiframe側リスナーが処理する。ここはiframe外の余白用。
+    // iframe上では親にバブリングしないため二重表示にはならない。
+    e.preventDefault();
+    setIeMenu({ x: e.clientX, y: e.clientY });
+  };
 
   useEffect(() => {
     if (!currentUrl || useProxy || loading === false) return;
@@ -620,7 +739,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
+    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
       <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
         <Button size="sm" disabled={!canBack} onClick={goBack}>◀ Back</Button>
         <Button size="sm" disabled={!canForward} onClick={goForward}>▶ Forward</Button>
@@ -632,9 +751,8 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Checkbox checked={useProxy} onChange={() => setUseProxy((v) => !v)} label="互換表示(プロキシ経由)" value="proxy" />
         {probeInfo && useProxy && <span style={{ fontSize: 10, color: "#808000", background: "#ffffe1", border: "1px solid #c0c0c0", padding: "1px 4px" }}>自動切替: {probeInfo}</span>}
-        <span style={{ fontSize: 10, color: "#808080" }}>{useProxy ? "via /api/proxy" : "direct"}</span>
+        <span style={{ fontSize: 10, color: "#808080" }}>{useProxy ? "via /api/proxy" : "direct"} · 右クリックメニューから切替可</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>再読込</Button>
         </div>
@@ -732,6 +850,144 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       </div>
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}></div>
+
+      {/* Wenge内右クリックメニュー (実機メニューの代わり・Win95風) */}
+      {ieMenu && (
+        <>
+          <div
+            onClick={() => setIeMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setIeMenu(null); }}
+            style={{ position: "fixed", inset: 0, zIndex: 9990, background: "transparent" }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              left: Math.max(4, Math.min(ieMenu.x, window.innerWidth - 230)),
+              top: Math.max(4, Math.min(ieMenu.y, window.innerHeight - 320)),
+              zIndex: 9991,
+              minWidth: 210,
+              maxWidth: 260,
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <MenuList style={{ width: "100%" }}>
+              <MenuListItem
+                disabled={!canBack}
+                onClick={() => { setIeMenu(null); goBack(); }}
+                style={{ fontSize: 11 }}
+              >
+                ◀ 戻る
+              </MenuListItem>
+              <MenuListItem
+                disabled={!canForward}
+                onClick={() => { setIeMenu(null); goForward(); }}
+                style={{ fontSize: 11 }}
+              >
+                ▶ 進む
+              </MenuListItem>
+              <MenuListItem
+                disabled={!currentUrl && !vfsHtml}
+                onClick={() => { setIeMenu(null); handleRefresh(); }}
+                style={{ fontSize: 11 }}
+              >
+                ↻ 再読込
+              </MenuListItem>
+              <Separator />
+              {ieMenu.linkUrl && (
+                <MenuListItem
+                  onClick={() => { const u = ieMenu.linkUrl!; setIeMenu(null); navigateTo(u); }}
+                  style={{ fontSize: 11 }}
+                >
+                  新しいウィンドウで開く (Wenge IE)
+                </MenuListItem>
+              )}
+              {ieMenu.linkUrl && (
+                <MenuListItem onClick={() => copyText(ieMenu.linkUrl!, "リンクURL")} style={{ fontSize: 11 }}>
+                  リンクのURLをコピー
+                </MenuListItem>
+              )}
+              {ieMenu.imgUrl && !ieMenu.linkUrl && (
+                <MenuListItem onClick={() => copyText(ieMenu.imgUrl!, "画像URL")} style={{ fontSize: 11 }}>
+                  画像のURLをコピー
+                </MenuListItem>
+              )}
+              {ieMenu.imgUrl && !ieMenu.linkUrl && (
+                <MenuListItem
+                  onClick={() => {
+                    const u = ieMenu.imgUrl!;
+                    setIeMenu(null);
+                    const name = fileNameForSave(u, null);
+                    saveUrlToVfs(u, getVfsDirByExt(name), { filename: name }).catch(() => {
+                      showError("Download", "VFS保存に失敗しました。");
+                    });
+                  }}
+                  style={{ fontSize: 11 }}
+                >
+                  画像をWengeに保存
+                </MenuListItem>
+              )}
+              {ieMenu.selText && (
+                <MenuListItem onClick={() => copyText(ieMenu.selText!, "選択文字")} style={{ fontSize: 11 }}>
+                  選択文字をコピー
+                </MenuListItem>
+              )}
+              {!ieMenu.linkUrl && currentUrl && (
+                <MenuListItem onClick={() => copyText(currentUrl, "ページURL")} style={{ fontSize: 11 }}>
+                  ページのURLをコピー
+                </MenuListItem>
+              )}
+              {(ieMenu.linkUrl || ieMenu.imgUrl || ieMenu.selText || currentUrl) && <Separator />}
+              <MenuListItem
+                disabled={saving || (!currentUrl && !address.trim() && !ieMenu.linkUrl)}
+                onClick={() => {
+                  if (ieMenu.linkUrl) {
+                    const u = ieMenu.linkUrl;
+                    setIeMenu(null);
+                    const name = fileNameForSave(u, null);
+                    setSaving(true);
+                    setStatusText(`Saving ${u} → Wenge...`);
+                    fetch(`/api/proxy?url=${encodeURIComponent(u)}`)
+                      .then(async (res) => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        const blob = await res.blob();
+                        await saveUrlToVfs(u, getVfsDirByExt(name), { filename: name, mime: blob.type || "text/html" });
+                        setStatusText(`Document done: ${u}`);
+                      })
+                      .catch((e: unknown) => {
+                        const msg = e instanceof Error ? e.message : String(e);
+                        setError(`保存に失敗しました: ${msg}`);
+                      })
+                      .finally(() => setSaving(false));
+                  } else {
+                    setIeMenu(null);
+                    void handleSave();
+                  }
+                }}
+                style={{ fontSize: 11 }}
+              >
+                ページをWengeに保存
+              </MenuListItem>
+              <Separator />
+              <MenuListItem
+                onClick={() => {
+                  setUseProxy((v) => !v);
+                  setIeMenu(null);
+                  setStatusText(useProxy ? "直接表示に切替 (頁内右クリックは実機メニューになります)" : "互換表示(プロキシ経由)に切替");
+                }}
+                style={{ fontSize: 11 }}
+              >
+                {useProxy ? "✓ " : ""}互換表示(プロキシ経由)
+              </MenuListItem>
+              {!useProxy && (
+                <div style={{ fontSize: 10, color: "#808080", padding: "2px 8px", lineHeight: 1.4 }}>
+                  直接表示では頁内の右クリックは実機メニューになります
+                </div>
+              )}
+            </MenuList>
+          </div>
+        </>
+      )}
     </div>
   );
 }
