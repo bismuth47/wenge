@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 
 // Animated hourglass for Windows 95 busy state
-// Cycles through wait_0..wait_7 every 120ms when body has .w95-busy or .w95-appstarting
+// Cycles through wait_0..wait_7 every 80ms when body has .w95-busy or .w95-appstarting
 const WAIT_FRAMES = 8;
-const FRAME_MS = 120;
+const FRAME_MS = 80;
 
 export function useAnimatedCursor() {
   useEffect(() => {
