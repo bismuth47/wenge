@@ -3,16 +3,19 @@ import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
 import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, createR2Folder, type R2File } from "../lib/r2";
 import { handleDownload } from "../lib/downloadTarget";
+import { acquireBusy, releaseBusy } from "../hooks/useAnimatedCursor";
 
 type FileItem = R2File;
 
 export function FileShareApp() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [prefix, setPrefix] = useState("");
 
   const fetchFiles = async () => {
+    setLoading(true);
     try {
       // Folder-aware list; FileShare keeps working with flat prefix filter
       const data = await listR2(prefix);
@@ -30,12 +33,21 @@ export function FileShareApp() {
       } else {
         setFiles([]);
       }
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchFiles();
   }, []);
+
+  // ロード/アップロード中はアニメーション待機カーソル (wait_0..wait_7) を表示
+  useEffect(() => {
+    const busy = loading || uploading;
+    if (busy) acquireBusy();
+    return () => { if (busy) releaseBusy(); };
+  }, [loading, uploading]);
 
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const filesToUpload = Array.from(e.target.files || []);

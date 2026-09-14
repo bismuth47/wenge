@@ -40,20 +40,10 @@ import { setPendingVfsFile, vfsOpenTarget } from "../lib/vfs/openWith";
 import { getFsClipboard, setFsClipboard, type FsClipboardItem } from "../lib/fsClipboard";
 import { sendItemToDesktop } from "../lib/desktopDropBridge";
 import { fromExplorerPath, normalizeVfsDir, normalizeVfsPath } from "../lib/vfs/path";
-import { setBusy } from "../hooks/useAnimatedCursor";
+import { acquireBusy, releaseBusy } from "../hooks/useAnimatedCursor";
 
 // --- Animated busy cursor (wait_0..wait_7) while async folder loads are in flight ---
-// A module-level ref counter lets multiple Explorer windows coexist: the global
-// w95-busy class is only cleared once the LAST window stops loading.
-let explorerBusyRefs = 0;
-function acquireExplorerBusy() {
-  if (explorerBusyRefs === 0) setBusy(true);
-  explorerBusyRefs += 1;
-}
-function releaseExplorerBusy() {
-  explorerBusyRefs = Math.max(0, explorerBusyRefs - 1);
-  if (explorerBusyRefs === 0) setBusy(false);
-}
+// 複数Explorer窓の共存は useAnimatedCursor 側のグローバル参照カウントで管理する。
 
 export type ExplorerOpenId = "notepad"|"wordpad"|"paint"|"calc"|"clock"|"msdos"|"minesweeper"|"solitaire"|"freecell"|"hearts"|"media-player"|"cd-player"|"sound-recorder"|"volume"|"control"|"help"|"find"|"recycle"|"network"|"my-computer"|string;
 
@@ -141,6 +131,7 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
   const [r2Note, setR2Note] = useState<string | null>(null);
   const [r2NoteDismissed, setR2NoteDismissed] = useState(false);
   const [r2Busy, setR2Busy] = useState<string | null>(null);
+  const [vfsBusy, setVfsBusy] = useState<string | null>(null);
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [mkdirName, setMkdirName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -209,10 +200,11 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
   const files = dir?.files ?? [];
 
   // フォルダ移動・読込中はアニメーション待機カーソル (wait_0..wait_7) を表示する。
-  const explorerLoading = r2Loading || dlLoading || vfsLoading;
+  // r2Busy/vfsBusy (Uploading/Deleting/Opening/Copying等) もロード扱いでbusy化する。
+  const explorerLoading = r2Loading || dlLoading || vfsLoading || !!r2Busy || !!vfsBusy;
   useEffect(() => {
-    if (explorerLoading) acquireExplorerBusy();
-    return () => { if (explorerLoading) releaseExplorerBusy(); };
+    if (explorerLoading) acquireBusy();
+    return () => { if (explorerLoading) releaseBusy(); };
   }, [explorerLoading]);
   const openVfsEntry = (id: string) => {
     const f = vfsFiles.find((x) => x.id === id);
@@ -473,8 +465,6 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
   };
-
-  const [vfsBusy, setVfsBusy] = useState<string | null>(null);
 
   // --- 右クリック「デスクトップと同じメニュー」のための項目（コンテキストメニュー） ---
 

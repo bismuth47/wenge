@@ -75,10 +75,10 @@ const GlobalStyle = createGlobalStyle`
     outline-offset: -2px;
   }
   .w95-busy, .w95-busy * {
-    cursor: url('/cursors/wait.png') 16 16, wait !important;
+    cursor: var(--w95-wait-cursor, url('/cursors/wait_0.png') 16 16, wait) !important;
   }
   .w95-appstarting, .w95-appstarting * {
-    cursor: url('/cursors/appstarting.png') 0 0, progress !important;
+    cursor: var(--w95-appstarting-cursor, url('/cursors/appstarting.png') 0 0, progress) !important;
   }
   /* IE読込中: 窓内だけ待機カーソル (矢印+砂時計)。iframe文書入替の隙に
      OS標準カーソルへ戻るのを防ぐ。iframe内部は読込オーバーレイが覆うため
