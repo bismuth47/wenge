@@ -10,6 +10,12 @@ export function useAnimatedCursor() {
     let frame = 0;
     let raf: number | null = null;
     let last = performance.now();
+    const rootStyle = document.documentElement.style;
+    // 初回busyの1フレーム目から画像が確定しているよう、変数を前もって温める。
+    // (warmにしておくことで、busy開始直後のフォールバック解決やデコード待ちによる
+    // ネイティブカーソルの一瞬表示を防ぐ。画像自体は起動時プリロード済み)
+    rootStyle.setProperty("--w95-wait-cursor", `url('/cursors/wait_0.png') 16 16, wait`);
+    rootStyle.setProperty("--w95-appstarting-cursor", `url('/cursors/appstarting.png') 0 0, progress`);
 
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
@@ -18,7 +24,6 @@ export function useAnimatedCursor() {
 
       const isBusy = document.body.classList.contains("w95-busy");
       const isAppStarting = document.body.classList.contains("w95-appstarting");
-      const rootStyle = document.documentElement.style;
 
       if (isBusy) {
         const url = `/cursors/wait_${frame % WAIT_FRAMES}.png`;
@@ -35,14 +40,9 @@ export function useAnimatedCursor() {
         rootStyle.setProperty("--w95-appstarting-cursor", `url('${url}') 0 0, progress`);
         frame = (frame + 1) % WAIT_FRAMES;
       } else {
-        // busy/appstarting クラスが外れたら変数を掃除 (次回の開始を0フレーム目からに)
-        // 旧実装の inline cursor が残っていた場合の互換掃除も兼ねる
-        if (rootStyle.getPropertyValue("--w95-wait-cursor")) {
-          rootStyle.removeProperty("--w95-wait-cursor");
-        }
-        if (rootStyle.getPropertyValue("--w95-appstarting-cursor")) {
-          rootStyle.removeProperty("--w95-appstarting-cursor");
-        }
+        // アイドル時はフレーム位置だけ戻す。変数は温めたまま残し、
+        // 次回busyの1フレーム目も確実にカスタム画像から始める。
+        // (旧実装の inline cursor が残っていた場合の互換掃除も兼ねる)
         if (
           document.documentElement.style.cursor.includes("wait_") ||
           document.documentElement.style.cursor.includes("appstarting")

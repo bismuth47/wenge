@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, Frame, MenuList, MenuListItem, ProgressBar, Separator, TextInput } from "react95";
 import { showConfirm, showError, showInfo } from "../components/SystemDialog";
 import { ICONS } from "../assets/icons";
@@ -201,8 +201,9 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
 
   // フォルダ移動・読込中はアニメーション待機カーソル (wait_0..wait_7) を表示する。
   // r2Busy/vfsBusy (Uploading/Deleting/Opening/Copying等) もロード扱いでbusy化する。
+  // useLayoutEffectでペイント前にクラスを付与し、開いた瞬間の1フレームのカーソル切れを防ぐ。
   const explorerLoading = r2Loading || dlLoading || vfsLoading || !!r2Busy || !!vfsBusy;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (explorerLoading) acquireBusy();
     return () => { if (explorerLoading) releaseBusy(); };
   }, [explorerLoading]);

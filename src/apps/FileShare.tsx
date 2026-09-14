@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { Button, TextInput, Fieldset, ProgressBar } from "react95";
 import { ICONS, ICON_FALLBACK } from "../assets/icons";
 import { guessMime, listR2, normalizePrefix, r2NameOfKey, uploadToR2, createR2Folder, type R2File } from "../lib/r2";
@@ -10,7 +10,8 @@ type FileItem = R2File;
 export function FileShareApp() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // 初回マウント時からローディング扱いにし、開いた瞬間の1フレームも待機カーソルにする
+  const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [prefix, setPrefix] = useState("");
 
@@ -43,7 +44,8 @@ export function FileShareApp() {
   }, []);
 
   // ロード/アップロード中はアニメーション待機カーソル (wait_0..wait_7) を表示
-  useEffect(() => {
+  // useLayoutEffectでペイント前にクラスを付与し、開いた瞬間の1フレームのカーソル切れを防ぐ
+  useLayoutEffect(() => {
     const busy = loading || uploading;
     if (busy) acquireBusy();
     return () => { if (busy) releaseBusy(); };
