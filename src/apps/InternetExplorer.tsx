@@ -937,11 +937,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         </div>
       </div>
 
-      <div style={{ fontSize: 11, background: "#c0c0c0", border: "2px inset", padding: "2px 6px", display: "flex", justifyContent: "space-between", gap: 8, overflow: "hidden" }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeTab?.currentUrl ? activeTab.statusText : "準備完了"}</span>
-        <span style={{ flexShrink: 0, color: "#808080" }}>{activeTab?.currentUrl ? "Proxy" : "0 pages"} | {activeTab ? activeTab.historyStack.length : 0} pages | {tabs.length} tabs</span>
-      </div>
-
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}></div>
 
       {/* Wenge内右クリックメニュー (実機メニューの代わり・Win95風) */}
