@@ -22,7 +22,7 @@ import { SystemDialogs, showConfirm, showError, showInfo } from "./components/Sy
 import { XpBoot } from "./components/XpBoot";
 import { XpLogin } from "./components/XpLogin";
 import { useClock } from "./hooks/useClock";
-import { SOUNDS, useSound, getVolume, getSoundEnabled, setSoundEnabled, setVolume } from "./hooks/useSound";
+import { SOUNDS, useSound, getVolume, getSoundEnabled, setSoundEnabled, setVolume, applyMasterVolume } from "./hooks/useSound";
 import { useAnimatedCursor } from "./hooks/useAnimatedCursor";
 import { NotepadApp } from "./apps/Notepad";
 import { MyComputerApp } from "./apps/MyComputer";
@@ -2572,7 +2572,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
                    <MenuListItem onClick={() => { openWindow("run", { silent: true }); setStartOpen(false); }} style={{ height:32, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.run} alt="" width={20} height={20} style={{ marginRight: 5 }} /> <span style={{ flex:1, textAlign:"left" }}>Run...</span></MenuListItem>
                    <Separator />
                    <MenuListItem onClick={() => { playError(); setShowBsod(true); }} style={{ height:26, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.bsod} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /><span style={{ flex:1, textAlign:"left" }}>Blue Screen</span></MenuListItem>
-                   <MenuListItem onClick={() => { showConfirm("Shut Down Wenge", "Are you sure you want to shut down?").then((ok) => { if (!ok) return; const a = new Audio(SOUNDS.shutdown); a.volume = 0.5; a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); }); }} style={{ height:26, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /><span style={{ flex:1, textAlign:"left" }}>Shut Down...</span></MenuListItem>
+                   <MenuListItem onClick={() => { showConfirm("Shut Down Wenge", "Are you sure you want to shut down?").then((ok) => { if (!ok) return; const a = new Audio(SOUNDS.shutdown); applyMasterVolume(a, 0.5); a.play().catch(()=>{}); setTimeout(()=>location.reload(), 1500); }); }} style={{ height:26, display:"flex", alignItems:"center", justifyContent:"flex-start", cursor: "url('/cursors/arrow.png') 0 0, default" }}><img src={ICONS.shutdown} alt="" width={20} height={20} style={{ marginRight: 5, imageRendering: "pixelated" as const }} /><span style={{ flex:1, textAlign:"left" }}>Shut Down...</span></MenuListItem>
                 </div>
               </div>
             </MenuList>

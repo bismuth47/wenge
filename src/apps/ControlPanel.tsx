@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button, Checkbox, Fieldset, Radio, Select, Slider } from "react95";
-import { getSoundEnabled, setSoundEnabled, SOUNDS } from "../hooks/useSound";
+import { getSoundEnabled, setSoundEnabled, SOUNDS, applyMasterVolume } from "../hooks/useSound";
 import { showInfo } from "../components/SystemDialog";
 import { DL_TARGET_EVENT, getDownloadSetting, setDownloadSetting, type DownloadSetting } from "../lib/downloadTarget";
 import {
@@ -98,10 +98,10 @@ export function ControlPanelApp() {
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Checkbox checked={soundEnabled} onChange={() => setSoundEnabledState((v) => !v)} value="enabled" label="Sound enabled (default ON)" />
-          <Button size="sm" onClick={() => { const a = new Audio(SOUNDS.chord); a.volume = volume / 100; if (!soundEnabled) a.muted = true; a.play().catch(()=>{}); }}>Test</Button>
+          <Button size="sm" onClick={() => { const a = new Audio(SOUNDS.chord); applyMasterVolume(a, volume / 100); if (!soundEnabled) a.muted = true; a.play().catch(()=>{}); }}>Test</Button>
         </div>
         <div style={{ fontSize: 10, color: "#808080", marginTop: 4 }}>
-          デフォルトON。OFFにすると全ての効果音(起動/操作/エラー)がミュートされます。Media Playerの音量は別。
+          デフォルトON。OFFにすると全ての効果音(起動/操作/エラー)がミュートされます。タスクバーの音量はマスターとして全ての音(Media Player含む)に掛かります。
         </div>
       </Fieldset>
 

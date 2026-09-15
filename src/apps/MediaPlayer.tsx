@@ -31,6 +31,7 @@ function formatTime(s: number) {
 
 import { consumePendingVfsFile } from "../lib/vfs/openWith";
 import type { VfsFile } from "../lib/vfs/types";
+import { getSoundEnabled, getVolume } from "../hooks/useSound";
 
 export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
   const [tracks, setTracks] = useState<Track[]>(BUILTIN_TRACKS);
@@ -40,6 +41,20 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(70);
   const [muted, setMuted] = useState(false);
+  // タスクバーのマスター音量。タスクバー操作で変わるのでイベント購読し、
+  // 再生音量 = ローカル音量 × マスターにする (トレイが全てを制御)
+  const [masterVol, setMasterVol] = useState(() => getVolume());
+  const [masterEnabled, setMasterEnabled] = useState(() => getSoundEnabled());
+  useEffect(() => {
+    const onVol = (e: Event) => setMasterVol((e as CustomEvent<number>).detail);
+    const onEn = (e: Event) => setMasterEnabled((e as CustomEvent<boolean>).detail);
+    window.addEventListener("wenge:volume", onVol);
+    window.addEventListener("wenge:sound-enabled", onEn);
+    return () => {
+      window.removeEventListener("wenge:volume", onVol);
+      window.removeEventListener("wenge:sound-enabled", onEn);
+    };
+  }, []);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -137,8 +152,8 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
 
   useEffect(() => {
     const audio = ensureAudio();
-    audio.volume = muted ? 0 : volume / 100;
-  }, [volume, muted, ensureAudio]);
+    audio.volume = muted || !masterEnabled ? 0 : (volume / 100) * (masterVol / 100);
+  }, [volume, muted, masterVol, masterEnabled, ensureAudio]);
 
   useEffect(() => {
     const audio = ensureAudio();

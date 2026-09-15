@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import styled, { keyframes } from "styled-components";
 import { Button, TextInput } from "react95";
-import { SOUNDS } from "../hooks/useSound";
+import { SOUNDS, applyMasterVolume } from "../hooks/useSound";
 import { ICONS } from "../assets/icons";
 
 // Hard-coded login password (spec: 4747).
@@ -237,7 +237,7 @@ export function XpLogin({ onSuccess }: { onSuccess: () => void }) {
         errorSoundRef.current.preload = "auto";
       }
       const a = errorSoundRef.current;
-      a.volume = 0.5;
+      applyMasterVolume(a, 0.5);
       a.currentTime = 0;
       a.play().catch(() => {});
     } catch {}
@@ -318,7 +318,7 @@ export function XpLogin({ onSuccess }: { onSuccess: () => void }) {
             if (window.confirm("Turn off wenge?")) {
               try {
                 const a = new Audio(SOUNDS.shutdown);
-                a.volume = 0.5;
+                applyMasterVolume(a, 0.5);
                 a.play().catch(() => {});
               } catch {}
               window.setTimeout(() => window.location.reload(), 1200);

@@ -91,6 +91,21 @@ function getStoredVolume(): number {
 
 export function getVolume(): number { return getStoredVolume(); }
 
+/** Master gain 0..1 reflecting the taskbar tray volume + mute switch.
+ *  All audio output (effects, Media Player, test/shutdown sounds) should
+ *  go through this so the tray controls *everything*. */
+export function getMasterGain(): number {
+  if (!isSoundEnabled()) return 0;
+  return getStoredVolume() / 100;
+}
+
+/** Apply the master gain to an ad-hoc Audio element (scale = local factor 0..1). */
+export function applyMasterVolume(audio: HTMLAudioElement, scale = 1): void {
+  try {
+    audio.volume = Math.max(0, Math.min(1, scale * getMasterGain()));
+  } catch {}
+}
+
 export function setVolume(vol: number) {
   const v = Math.max(0, Math.min(100, Math.round(vol)));
   try { localStorage.setItem("wenge_volume", String(v)); } catch {}

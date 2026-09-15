@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import styled from "styled-components";
 import { Button, Checkbox, Radio, Window, WindowHeader, WindowContent } from "react95";
 import { CloseGlyph } from "./CaptionGlyphs";
+import { applyMasterVolume } from "../hooks/useSound";
 
 export type SystemDialogKind = "error" | "confirm" | "info" | "download-choice";
 
@@ -162,7 +163,7 @@ export function SystemDialogs() {
     if (top.kind !== "error") return;
     try {
       const a = new Audio("/sounds/Critical Stop.wav");
-      a.volume = 0.5;
+      applyMasterVolume(a, 0.5);
       a.play().catch(() => {});
     } catch {}
   }, [top?.id]);
