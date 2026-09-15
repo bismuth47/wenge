@@ -49,6 +49,8 @@ const Content = styled(WindowContent)`
   position: relative;
   display: flex;
   height: 100%;
+  /* react95既定の padding:16px を潰し、IE等のコンテンツを縁まで広げる */
+  padding: 0;
 `;
 
 const ResizeHandle = styled.div`

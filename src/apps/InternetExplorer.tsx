@@ -1036,7 +1036,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         </Frame>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, background: "#fff", border: "2px inset #fff", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ flex: 1, minHeight: 0, background: "#fff", border: "none", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div data-ie-iframe-layer style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden" }}>
           {tabs.map((t) => {
             const isActive = t.id === activeTabId;
