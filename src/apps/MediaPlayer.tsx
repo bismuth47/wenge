@@ -39,8 +39,33 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(70);
-  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(() => {
+    try {
+      const v = localStorage.getItem("wenge_mediaplayer_volume");
+      if (v !== null) {
+        const n = Number(v);
+        if (Number.isFinite(n)) return Math.max(0, Math.min(100, Math.round(n)));
+      }
+    } catch {}
+    return 70;
+  });
+  const [muted, setMuted] = useState(() => {
+    try {
+      return localStorage.getItem("wenge_mediaplayer_muted") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("wenge_mediaplayer_volume", String(volume));
+    } catch {}
+  }, [volume]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("wenge_mediaplayer_muted", muted ? "1" : "0");
+    } catch {}
+  }, [muted]);
   // タスクバーのマスター音量。タスクバー操作で変わるのでイベント購読し、
   // 再生音量 = ローカル音量 × マスターにする (トレイが全てを制御)
   const [masterVol, setMasterVol] = useState(() => getVolume());
