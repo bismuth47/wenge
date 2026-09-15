@@ -942,7 +942,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   };
 
   return (
-    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} className={anyLoading ? "w95-ie-loading" : undefined} style={{ display: "flex", flexDirection: "column", gap: 6, height: "100%", minHeight: 320 }}>
+    <div ref={ieRootRef} onContextMenu={handleIeRootContextMenu} className={anyLoading ? "w95-ie-loading" : undefined} style={{ display: "flex", flexDirection: "column", gap: 4, height: "100%", minHeight: 0, flex: 1, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 2, overflowX: "auto", padding: "2px 2px 0", background: "#008080" }}>
         {tabs.map((t) => {
           const isActive = t.id === activeTabId;
@@ -992,10 +992,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         <Button size="sm" onClick={handleSave} disabled={saving || (!activeTab?.currentUrl && !activeTab?.address.trim())} title="このページをWenge内に保存">Wenge保存</Button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 10, color: "#808080" }}>via /api/proxy (全サイト互換表示)・全タブ保持</span>
-      </div>
-
       {anyLoading && activeTab?.loading && <ProgressBar value={60} style={{ height: 12 }} />}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11 }}>
@@ -1040,7 +1036,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
         </Frame>
       )}
 
-      <div style={{ flex: 1, minHeight: 260, background: "#fff", border: "2px inset #fff", padding: 2, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ flex: 1, minHeight: 0, background: "#fff", border: "2px inset #fff", padding: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div data-ie-iframe-layer style={{ flex: 1, position: "relative", background: "#fff", overflow: "hidden" }}>
           {tabs.map((t) => {
             const isActive = t.id === activeTabId;
@@ -1086,8 +1082,6 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           })}
         </div>
       </div>
-
-      <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.4 }}></div>
 
       {/* Wenge内右クリックメニュー (実機メニューの代わり・Win95風) */}
       {ieMenu && (
