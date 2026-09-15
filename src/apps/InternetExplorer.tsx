@@ -658,12 +658,29 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     const onSubmit = (e: Event) => {
       const f = e.target as HTMLFormElement | null;
       if (!f || f.tagName !== "FORM") return;
+      // GETフォームのみ横取り。POST等はGET偽装せず素通し(ネイティブ送信に任せる)。
+      let method = "GET";
+      try { method = (f.method || f.getAttribute("method") || "GET").toUpperCase(); } catch { method = "GET"; }
+      if (method !== "GET" && method !== "") return;
+      const rawAction = f.getAttribute("action");
+      const base = resolveAbs(rawAction ? rawAction : (doc.baseURI || baseUrl));
+      if (!base || !/^https?:/i.test(base)) return;
       e.preventDefault();
       e.stopPropagation();
-      const action = resolveAbs(f.getAttribute("action") || "");
-      if (!action || !/^https?:/i.test(action)) return;
+      // 入力値をクエリにシリアライズ(actionの既存クエリは保持)。File値は除外。
+      let url = base;
+      try {
+        const u = new URL(base);
+        const fd = new FormData(f);
+        fd.forEach((v, k) => { if (typeof v === "string") u.searchParams.append(k, v); });
+        const sub = (e as SubmitEvent).submitter as unknown as { name?: string; value?: string; type?: string } | null;
+        if (sub?.name && sub.type !== "image" && sub.value !== undefined) {
+          u.searchParams.append(sub.name, sub.value);
+        }
+        url = u.toString();
+      } catch { url = base; }
       const t = (f.getAttribute("target") || "").toLowerCase();
-      routeUrl(action, t === "_blank" ? "_blank" : "_self");
+      routeUrl(url, t === "_blank" ? "_blank" : "_self");
     };
     doc.addEventListener("click", onClick, true);
     doc.addEventListener("auxclick", onAuxClick, true);
