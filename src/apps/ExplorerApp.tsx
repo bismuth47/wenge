@@ -42,6 +42,7 @@ import { getFsClipboard, setFsClipboard, type FsClipboardItem } from "../lib/fsC
 import { sendItemToDesktop } from "../lib/desktopDropBridge";
 import { fromExplorerPath, normalizeVfsDir, normalizeVfsPath } from "../lib/vfs/path";
 import { acquireBusy, releaseBusy } from "../hooks/useAnimatedCursor";
+import { toVirtualPoint } from "../lib/display";
 
 // --- Animated busy cursor (wait_0..wait_7) while async folder loads are in flight ---
 // 複数Explorer窓の共存は useAnimatedCursor 側のグローバル参照カウントで管理する。
@@ -973,10 +974,16 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
               style={{ paddingLeft: (n.label === "Wenge" || n.label === "Windows" || n.label === "Downloads" || n.label === "Desktop" || n.label === "Documents") ? 12 : 0, background: active ? "#000080" : "transparent", color: active ? "#fff" : "#000", display: "flex", alignItems: "center", gap: 4, cursor: "url('/cursors/arrow.png') 0 0, default", paddingTop: 2, paddingBottom: 2 }}><img src={n.icon} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {n.label}</div>);
           })}
         </Frame>
-        {ctxMenu && (
+        {ctxMenu && (() => {
+          // client座標→仮想論理pxに換算 (仮想画面は transform scale 下のため、
+          // 生client値を fixed 配置に使うとカーソルから大きくずれる)。
+          // 配置用ペイロード (sendItemToDesktop→placeShortcutAt) は
+          // 二重換算を避けるため生client値のまま渡す。
+          const v = toVirtualPoint(ctxMenu.x, ctxMenu.y);
+          return (
           <div
             data-explorer-ctx-menu
-            style={{ position: "fixed", left: ctxMenu.x + 4, top: ctxMenu.y + 2, zIndex: 9999, minWidth: 168, background: "#c0c0c0", border: "2px outset #fff", padding: 2, fontFamily: "MS Sans Serif", fontSize: 11, boxShadow: "2px 2px 5px rgba(0,0,0,0.4)" }}
+            style={{ position: "fixed", left: v.x, top: v.y, zIndex: 9999, minWidth: 168, background: "#c0c0c0", border: "2px outset #fff", padding: 2, fontFamily: "MS Sans Serif", fontSize: 11, boxShadow: "2px 2px 5px rgba(0,0,0,0.4)" }}
             onMouseDown={(e)=> e.stopPropagation()}
             onContextMenu={(e)=> { e.preventDefault(); e.stopPropagation(); }}
           >
@@ -995,7 +1002,8 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
               <MenuListItem onClick={propertiesCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Properties</MenuListItem>
             </MenuList>
           </div>
-        )}
+          );
+        })()}
         <Frame
           variant="well"
           style={{ flex: 1, background: "#fff", padding: 0, overflow: "hidden", minHeight: 0, position: "relative" }}
