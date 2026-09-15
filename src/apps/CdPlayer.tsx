@@ -38,7 +38,7 @@ export function CdPlayerApp(){
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
           <span style={{ fontSize:10 }}>{String(Math.floor(pos/60)).padStart(2,"0")}:{String(pos%60).padStart(2,"0")}</span>
-          <div style={{ flex:1 }}><Slider value={pos} min={0} max={100} onChange={(e:any)=> setPos(Number(e.target.value))} /></div>
+          <div style={{ flex:1 }}><Slider value={pos} min={0} max={100} onChange={(v: number) => setPos(Math.max(0, Math.min(100, Math.round(v))))} /></div>
           <span style={{ fontSize:10 }}>4 tracks</span>
         </div>
         <div style={{ display:"flex", gap:1, height:10 }}>

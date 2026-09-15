@@ -93,7 +93,7 @@ export function ControlPanelApp() {
       <Fieldset label="Sound">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 12 }}>Volume</span>
-          <div style={{ width: 150 }}><Slider value={volume} onChange={(e: any) => setVolume(Number(e.target.value))} min={0} max={100} /></div>
+          <div style={{ width: 150 }}><Slider value={volume} onChange={(v: number) => setVolume(Math.max(0, Math.min(100, Math.round(v))))} min={0} max={100} /></div>
           <span style={{ fontSize: 12 }}>{volume}%</span>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>

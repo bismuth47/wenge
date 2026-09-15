@@ -567,7 +567,7 @@ function PaintApp() {
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
         <span style={{ fontSize: 11 }}>Width: {size}px</span>
-        <div style={{ width: 80 }}><Slider value={size} min={1} max={12} onChange={(e: any) => setSize(Number(e.target.value))} /></div>
+        <div style={{ width: 80 }}><Slider value={size} min={1} max={12} onChange={(v: number) => setSize(Math.max(1, Math.min(12, Math.round(v))))} /></div>
         <Button size="sm" onClick={() => {
           const ctx = canvasRef.current?.getContext("2d");
           if (ctx && canvasRef.current) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height); }
@@ -656,7 +656,7 @@ function DemoControls() {
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
           <TextInput value={text} onChange={(e) => setText(e.target.value)} placeholder="Text input" width={140} />
-          <div style={{ width: 100 }}><Slider value={slider} onChange={(e: any) => setSlider(Number(e.target.value))} min={0} max={100} /></div>
+          <div style={{ width: 100 }}><Slider value={slider} onChange={(v: number) => setSlider(Math.max(0, Math.min(100, Math.round(v))))} min={0} max={100} /></div>
           <span style={{ fontSize: 11 }}>{slider}%</span>
         </div>
         <ProgressBar value={slider} style={{ marginTop: 8 }} />

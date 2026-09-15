@@ -339,7 +339,7 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
         <Separator orientation="vertical" size="20px" style={{ margin: "0 4px" }} />
         <span style={{ fontSize: 11 }}>Vol</span>
         <div style={{ width: 90 }}>
-          <Slider value={volume} min={0} max={100} onChange={(e: any) => setVolume(Number(e.target.value))} />
+          <Slider value={volume} min={0} max={100} onChange={(v: number) => setVolume(Math.max(0, Math.min(100, Math.round(v))))} />
         </div>
         <Checkbox checked={muted} onChange={() => setMuted((v) => !v)} label="Mute" value="mute" />
       </div>
