@@ -47,23 +47,33 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const progressRef = useRef<HTMLInputElement | null>(null);
+  // 取り込み済みVFSトラックid。file propのidentity変化でのeffect再発火時に
+  // 重複追加・勝手な再生再開をしないためのガード
+  const importedVfsIds = useRef<Set<string>>(new Set());
+  const tracksRef = useRef<Track[]>(tracks);
+  tracksRef.current = tracks;
 
   // Open a VFS audio/video file (double-click on Desktop / Explorer)
   useEffect(() => {
     const target = file ?? consumePendingVfsFile();
     if (!target) return;
+    const trackId = `vfs-${target.id}`;
+    const existingIdx = tracksRef.current.findIndex((x) => x.id === trackId);
+    if (existingIdx >= 0 || importedVfsIds.current.has(trackId)) {
+      // 取り込み済みの再オープン: そのトラックへ移動して再生 (重複追加しない)
+      if (existingIdx >= 0) {
+        setIndex(existingIdx);
+        setPlaying(true);
+      }
+      return;
+    }
+    importedVfsIds.current.add(trackId);
     const url = URL.createObjectURL(target.blob);
-    const t: Track = { id: `vfs-${target.id}`, name: target.name, src: url, artist: "VFS" };
-    setTracks((prev) => [...prev, t]);
-    setIndex((prev) => prev); // index set below after tracks update
-    setTimeout(() => {
-      setTracks((prev) => {
-        const i = prev.findIndex((x) => x.id === t.id);
-        if (i >= 0) setIndex(i);
-        return prev;
-      });
-      setPlaying(true);
-    }, 0);
+    const t: Track = { id: trackId, name: target.name, src: url, artist: "VFS" };
+    const nextIdx = tracksRef.current.length;
+    setTracks((prev) => (prev.some((x) => x.id === t.id) ? prev : [...prev, t]));
+    setIndex(nextIdx);
+    setPlaying(true);
   }, [file]);
 
   const current = tracks[index] ?? null;
@@ -140,6 +150,11 @@ export function MediaPlayerApp({ file }: { file?: VfsFile | null }) {
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
+      for (const t of tracksRef.current) {
+        if (t.src.startsWith("blob:")) {
+          try { URL.revokeObjectURL(t.src); } catch {}
+        }
+      }
     };
   }, []);
 

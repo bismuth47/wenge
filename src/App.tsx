@@ -872,6 +872,26 @@ const ieFile = useMemo<VfsFile | null>(() => {
   };
 }, [vfsFileByApp]);
 
+// VFSファイルpropはidentityを安定させる (毎秒の時計再レンダーで別objectになると
+// 各アプリの [file] effect が再発火し、MediaPlayerが勝手に再生再開・Notepadが編集中内容を破棄する)
+const toVfsFileProp = (f: DesktopDoc | undefined): VfsFile | null => {
+  if (!f) return null;
+  return {
+    id: f.id,
+    path: `C:/Desktop/${f.name}`,
+    name: f.name,
+    dir: "C:/Desktop",
+    mime: f.mime,
+    size: f.size,
+    createdAt: f.createdAt,
+    updatedAt: f.createdAt,
+    blob: f.blob,
+  } as VfsFile;
+};
+const notepadFile = useMemo(() => toVfsFileProp(vfsFileByApp["notepad"]), [vfsFileByApp]);
+const mediaPlayerFile = useMemo(() => toVfsFileProp(vfsFileByApp["media-player"]), [vfsFileByApp]);
+const imageViewerFile = useMemo(() => toVfsFileProp(vfsFileByApp["image-viewer"]), [vfsFileByApp]);
+
 // グリッドにスナップ
 const snapPos=(x:number,y:number,deskW:number,deskH:number)=>{
   let nx=Math.max(0, Math.min(x, deskW - ICON_W));
@@ -2381,7 +2401,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
           const f = vfsFileByApp["notepad"];
           comp = (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <NotepadApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />
+              <NotepadApp key={f ? `vfs-${f.id}` : "blank"} file={notepadFile as never} />
               <Separator />
               <DemoControls />
             </div>
@@ -2389,7 +2409,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         }
         if (w.id === "media-player") {
           const f = vfsFileByApp["media-player"];
-          comp = <MediaPlayerApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />;
+          comp = <MediaPlayerApp key={f ? `vfs-${f.id}` : "blank"} file={mediaPlayerFile as never} />;
         }
         if (w.id === "wordpad") {
           const f = vfsFileByApp["wordpad"];
@@ -2397,7 +2417,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         }
         if (w.id === "image-viewer") {
           const f = vfsFileByApp["image-viewer"];
-          comp = <ImageViewerApp key={f ? `vfs-${f.id}` : "blank"} file={f ? { id: f.id, path: `C:/Desktop/${f.name}`, name: f.name, dir: "C:/Desktop", mime: f.mime, size: f.size, createdAt: f.createdAt, updatedAt: f.createdAt, blob: f.blob } as never : null} />;
+          comp = <ImageViewerApp key={f ? `vfs-${f.id}` : "blank"} file={imageViewerFile as never} />;
         }
         if (w.id === "ie") {
           comp = <InternetExplorerApp key={ieFile ? `vfs-${ieFile.id}` : "blank"} file={ieFile} />;
