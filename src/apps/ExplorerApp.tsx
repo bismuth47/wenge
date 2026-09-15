@@ -990,15 +990,15 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
             <MenuList data-explorer-ctx-menu style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 0 }}>
               <MenuListItem primary onClick={openCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}><b style={{ fontWeight: 700 }}>Open</b></MenuListItem>
               <MenuListItem onClick={exploreCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Explore</MenuListItem>
-              <Separator data-explorer-ctx-menu style={{ height: 10, margin: "2px 4px 2px 4px" }} />
+              <Separator data-explorer-ctx-menu />
               <MenuListItem disabled={!ctxMenu?.row} onClick={()=> cutCopyCtxRow("cut")} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Cut</MenuListItem>
               <MenuListItem disabled={!ctxMenu?.row} onClick={()=> cutCopyCtxRow("copy")} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Copy</MenuListItem>
               <MenuListItem disabled={!getFsClipboard()} onClick={()=> pasteCtxRow()} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Paste{getFsClipboard() ? ` (${getFsClipboard()!.op==="cut" ? "Move" : "Copy"}: ${getFsClipboard()!.label})` : ""}</MenuListItem>
-              <Separator data-explorer-ctx-menu style={{ height: 10, margin: "2px 4px 2px 4px" }} />
+              <Separator data-explorer-ctx-menu />
               <MenuListItem onClick={shortcutCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Create Shortcut</MenuListItem>
               <MenuListItem onClick={deleteCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Delete</MenuListItem>
               <MenuListItem onClick={renameCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Rename</MenuListItem>
-              <Separator data-explorer-ctx-menu style={{ height: 10, margin: "2px 4px 2px 4px" }} />
+              <Separator data-explorer-ctx-menu />
               <MenuListItem onClick={propertiesCtxRow} style={{ fontSize: 11, height: 18, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "0 12px 0 20px", lineHeight: 1.15 }}>Properties</MenuListItem>
             </MenuList>
           </div>
