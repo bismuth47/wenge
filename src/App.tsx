@@ -2462,8 +2462,8 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         </ContextMenu>
       )}
 
-      {/* Windows */}
-      {windows.filter((w) => w.isOpen && !w.isMinimized).map((w) => {
+      {/* Windows (最小化してもアンマウントせず display:none で隠す。MediaPlayer等の再生・状態を維持するため) */}
+      {windows.filter((w) => w.isOpen).map((w) => {
         const def = APP_DEFS[w.id];
         let comp: React.ReactNode = def.component;
         if (w.id === "recycle") comp = <RecycleBinApp playSound={playDing} />;
@@ -2495,8 +2495,8 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
           comp = <InternetExplorerApp key={ieFile ? `vfs-${ieFile.id}` : "blank"} file={ieFile} />;
         }
         return (
+          <div key={w.id} style={{ display: w.isMinimized ? "none" : "contents" }}>
           <WindowFrame
-            key={w.id}
             id={w.id}
             title={w.title}
             icon={w.icon}
@@ -2518,6 +2518,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
           >
             {comp}
           </WindowFrame>
+          </div>
         );
       })}
 
