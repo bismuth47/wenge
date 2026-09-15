@@ -56,7 +56,7 @@ import { NetworkApp } from "./apps/Network";
 import { CdPlayerApp } from "./apps/CdPlayer";
 import { ImageViewerApp } from "./apps/ImageViewer";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
-import { R2_DRAG_MIME, guessMime, listR2Flat, markWengeDragEnd, markWengeDragStart, r2NameOfKey, type R2DragItem, type WengeDropAction } from "./lib/r2";
+import { R2_DRAG_MIME, formatR2Path, guessMime, listR2, listR2Flat, markWengeDragEnd, markWengeDragStart, normalizePrefix, r2NameOfKey, type R2DragItem, type WengeDropAction } from "./lib/r2";
 import {
   deleteDesktopDoc,
   docIconKey,
@@ -835,7 +835,8 @@ const [desktopDocs, setDesktopDocs] = useState<DesktopDoc[]>([]);
 const [docDropBusy, setDocDropBusy] = useState<string | null>(null);
 // デスクトップショートカット (Explorerの静的エントリ等から作成。キーは `shortcut:<uid>`)
 // vfsId 付きは Documents/Downloads/Desktop 実体への参照 (Alt+ドロップで作成・ダブルクリックで元ファイルを開く)
-type DesktopShortcut = { key: string; label: string; iconSrc: string; appId?: string; explorerPath?: string; vfsId?: string };
+// r2Key / r2Prefix 付きは R2実体への参照 (右クリック Create Shortcut / Alt+ドロップで作成)
+type DesktopShortcut = { key: string; label: string; iconSrc: string; appId?: string; explorerPath?: string; vfsId?: string; r2Key?: string; r2Prefix?: string; r2Mime?: string; r2Size?: number };
 const [desktopShortcuts, setDesktopShortcuts] = useState<DesktopShortcut[]>(()=>{
   try{
     const raw=localStorage.getItem("wenge_desktop_shortcuts");
@@ -1190,10 +1191,28 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         // 実体のないエントリはショートカットアイコンとして配置する (修飾キーによらず)
         const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
         const iconSrc=item.iconSrc ?? (item.explorerPath ? ICONS.folderClosed : ICONS.fileWindows);
-        setDesktopShortcuts((prev)=>[...prev, { key, label: item.label, iconSrc, appId: item.appId, explorerPath: item.explorerPath, vfsId: item.vfsId }]);
+        setDesktopShortcuts((prev)=>[...prev, { key, label: item.label, iconSrc, appId: item.appId, explorerPath: item.explorerPath, vfsId: item.vfsId, r2Key: item.r2Key, r2Prefix: item.r2Prefix, r2Mime: item.r2Mime, r2Size: item.r2Size }]);
         placeShortcutAt(key,clientX,clientY);
         playRestore();
         return;
+      }
+      // R2実体への Alt+ドロップ / 右クリック Create Shortcut は参照ショートカットを作成 (コピーしない)
+      if(action==="shortcut"){
+        if(item.kind==="file"){
+          const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+          const parentPrefix = item.key.includes("/") ? normalizePrefix(item.key.slice(0, item.key.lastIndexOf("/") + 1)) : "";
+          setDesktopShortcuts((prev)=>[...prev, { key, label: item.name, iconSrc: ICONS.fileWindows, explorerPath: formatR2Path(parentPrefix), r2Key: item.key, r2Mime: item.mime, r2Size: item.size }]);
+          placeShortcutAt(key,clientX,clientY);
+          playRestore();
+          return;
+        }
+        if(item.kind==="folder"){
+          const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
+          setDesktopShortcuts((prev)=>[...prev, { key, label: item.name, iconSrc: ICONS.folderClosed, explorerPath: formatR2Path(item.prefix), r2Prefix: item.prefix }]);
+          placeShortcutAt(key,clientX,clientY);
+          playRestore();
+          return;
+        }
       }
       if(item.kind==="vfs-file"){
         // Explorer(VFS表示)からのドラッグ。実体はIndexedDBにある。
@@ -1441,6 +1460,59 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         showError("Shortcut", e?.message || "Could not open the original file.");
         return;
       }
+    }
+    if (sc.r2Key) {
+      // R2ファイルへの参照ショートカット: 新鮮なURLを取得して対応アプリで開く
+      try {
+        setDocDropBusy("Opening...");
+        const parentPrefix = sc.r2Key.includes("/") ? normalizePrefix(sc.r2Key.slice(0, sc.r2Key.lastIndexOf("/") + 1)) : "";
+        const listed = await listR2(parentPrefix);
+        const found = listed.files.find((f) => f.key === sc.r2Key);
+        const url = found?.url;
+        if (!url) throw new Error("The original file could not be found.\nIt may have been moved or deleted.");
+        const name = r2NameOfKey(sc.r2Key);
+        const mime = sc.r2Mime || guessMime(name);
+        const target = vfsOpenTarget({ id: `r2:${sc.r2Key}`, name, mime } as VfsFile);
+        if (target === "preview" || target === "explorer") {
+          window.open(url, "_blank", "noopener");
+          return;
+        }
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+        const blob = await res.blob();
+        const vfsFile = {
+          id: `r2:${sc.r2Key}`,
+          path: `R2:/${sc.r2Key}`,
+          name,
+          dir: "R2:/",
+          mime: blob.type || mime,
+          size: blob.size || sc.r2Size || 0,
+          createdAt: found?.uploadedAt ?? new Date().toISOString(),
+          updatedAt: found?.uploadedAt ?? new Date().toISOString(),
+          sourceUrl: url,
+          sourceR2Key: sc.r2Key,
+          blob,
+        } as VfsFile;
+        const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "ie" ? "ie" : "media-player";
+        setPendingVfsFile(vfsFile);
+        try { (window as any).__wengePendingVfs = vfsFile; } catch {}
+        setVfsFileByApp((prev) => ({ ...prev, [appId]: { id: vfsFile.id, name: vfsFile.name, mime: vfsFile.mime, size: vfsFile.size, createdAt: vfsFile.createdAt, updatedAt: vfsFile.updatedAt, sourceR2Key: vfsFile.sourceR2Key, sourceUrl: vfsFile.sourceUrl, blob: vfsFile.blob } as DesktopDoc }));
+        openWindow(appId as AppId, { silent: true });
+        return;
+      } catch (e: any) {
+        showError("Shortcut", e?.message || "Could not open the original file.");
+        return;
+      } finally {
+        setDocDropBusy(null);
+      }
+    }
+    if (sc.r2Prefix !== undefined || (sc.explorerPath && /^R2\s*:/i.test(sc.explorerPath))) {
+      // R2フォルダへの参照ショートカット: ExplorerをR2パスで開く
+      const r2path = sc.r2Prefix ?? "";
+      setExplorerInitPath(formatR2Path(r2path));
+      setExplorerOpenKey((k) => k + 1);
+      openWindow("explorer", { silent: true });
+      return;
     }
     if (sc.explorerPath) {
       setExplorerInitPath(sc.explorerPath);
@@ -1973,7 +2045,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
     } else if(t.kind==="shortcut"){
       const sc=desktopShortcuts.find((s)=> s.key===t.key);
       if(!sc) return;
-      setDesktopShortcuts((prev)=>[...prev,{ key, label: sc.label, iconSrc: sc.iconSrc, appId: sc.appId, explorerPath: sc.explorerPath, vfsId: sc.vfsId }]);
+      setDesktopShortcuts((prev)=>[...prev,{ key, label: sc.label, iconSrc: sc.iconSrc, appId: sc.appId, explorerPath: sc.explorerPath, vfsId: sc.vfsId, r2Key: sc.r2Key, r2Prefix: sc.r2Prefix, r2Mime: sc.r2Mime, r2Size: sc.r2Size }]);
     } else {
       return;
     }
@@ -2051,7 +2123,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         setIconPos((prev)=>({ ...prev, [cb.id]: spot }));
       } else {
         const key=`shortcut:${Date.now().toString(36)}${Math.floor(Math.random()*1e6).toString(36)}`;
-        setDesktopShortcuts((prev)=>[...prev,{ key, label: sc.label, iconSrc: sc.iconSrc, appId: sc.appId, explorerPath: sc.explorerPath, vfsId: sc.vfsId }]);
+        setDesktopShortcuts((prev)=>[...prev,{ key, label: sc.label, iconSrc: sc.iconSrc, appId: sc.appId, explorerPath: sc.explorerPath, vfsId: sc.vfsId, r2Key: sc.r2Key, r2Prefix: sc.r2Prefix, r2Mime: sc.r2Mime, r2Size: sc.r2Size }]);
         setIconPos((prev)=>({ ...prev, [key]: spot }));
       }
     } else if(cb.kind==="doc"){
@@ -2081,7 +2153,7 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
       showInfo(`${t.label} Properties`, `Type: ${doc.mime || "File"}\nLocation: C:\\Desktop\nSize: ${(doc.size/1024).toFixed(1)} KB\nCreated: ${new Date(doc.createdAt).toLocaleString()}\nModified: ${new Date(doc.updatedAt).toLocaleString()}`);
     } else if(t.kind==="shortcut"){
       const sc=desktopShortcuts.find((s)=> s.key===t.key);
-      const target = sc?.appId ? `Application: ${sc.appId}` : sc?.vfsId ? `File ID: ${sc.vfsId}` : sc?.explorerPath ? `Path: ${sc.explorerPath}` : "(unknown)";
+      const target = sc?.appId ? `Application: ${sc.appId}` : sc?.vfsId ? `File ID: ${sc.vfsId}` : sc?.r2Key ? `R2: ${sc.r2Key}` : sc?.r2Prefix !== undefined ? `R2: ${formatR2Path(sc.r2Prefix ?? "")}` : sc?.explorerPath ? `Path: ${sc.explorerPath}` : "(unknown)";
       showInfo(`${t.label} Properties`, `Type: Shortcut\nLocation: Desktop\nTarget: ${target}`);
     } else {
       showInfo("Run Properties", `Type: System command\nTarget: Run dialog`);

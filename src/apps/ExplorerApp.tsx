@@ -5,6 +5,7 @@ import { ICONS } from "../assets/icons";
 import {
   createR2Folder,
   deleteR2Key,
+  formatR2Path,
   guessMime,
   listR2,
   listR2Flat,
@@ -101,11 +102,8 @@ export function parseR2Path(p: string): string | null {
   return null;
 }
 
-export function formatR2Path(prefix: string): string {
-  const p = normalizePrefix(prefix);
-  if (!p) return "R2:\\";
-  return "R2:\\" + p.replace(/\//g, "\\").replace(/\\$/, "");
-}
+// 後方互換のため再エクスポート (新規コードは lib/r2 から import すること)
+export { formatR2Path };
 
 /** Virtual download folder backed by the VFS IndexedDB store. */
 export const DOWNLOADS_KEY = "C:\\Wenge\\Downloads";
@@ -120,11 +118,20 @@ function formatSize(bytes: number): string {
 }
 
 export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, file?: VfsFile) => void; initialPath?: string | null }) {
-  const [path, setPath] = useState(initialPath ?? "C:\\Wenge\\Documents");
-  const [input, setInput] = useState(initialPath ?? "C:\\Wenge\\Documents");
+  const [path, setPath] = useState(() => {
+    if (initialPath && parseR2Path(initialPath) !== null) return formatR2Path(parseR2Path(initialPath) ?? "");
+    return initialPath ?? "C:\\Wenge\\Documents";
+  });
+  const [input, setInput] = useState(() => {
+    if (initialPath && parseR2Path(initialPath) !== null) return formatR2Path(parseR2Path(initialPath) ?? "");
+    return initialPath ?? "C:\\Wenge\\Documents";
+  });
   const [selected, setSelected] = useState<string | null>(null);
   // --- R2 state ---
-  const [r2Prefix, setR2Prefix] = useState<string | null>(null); // null = local mode
+  const [r2Prefix, setR2Prefix] = useState<string | null>(() => {
+    if (initialPath && parseR2Path(initialPath) !== null) return normalizePrefix(parseR2Path(initialPath) ?? "");
+    return null;
+  }); // null = local mode
   const [r2Files, setR2Files] = useState<R2File[]>([]);
   const [r2Folders, setR2Folders] = useState<string[]>([]);
   const [r2Loading, setR2Loading] = useState(false);
@@ -594,10 +601,19 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
   const shortcutCtxRow = useCallback(() => {
     const row = explorerCtxRef.current ?? ctxMenu?.row ?? null;
     if(!row) return;
-    const item = asDragItem(row);
+    // R2実体は参照ショートカットとして送る (デスクトップ側でコピーせず参照配置する)。
+    // asDragItem() は通常DnD用に file/folder を返すため、ここでは明示的に shortcut化する。
+    let item: R2DragItem;
+    if (row.t === "r2-file") {
+      item = { kind: "shortcut", label: row.name, iconSrc: ICONS.fileWindows, r2Key: row.key, r2Mime: row.mime, r2Size: row.size, explorerPath: formatR2Path(row.key.slice(0, row.key.lastIndexOf("/") + 1)) };
+    } else if (row.t === "r2-folder") {
+      item = { kind: "shortcut", label: row.name, iconSrc: ICONS.folderClosed, r2Prefix: row.prefix, explorerPath: formatR2Path(row.prefix) };
+    } else {
+      item = asDragItem(row);
+    }
     sendItemToDesktop(item, "shortcut", ctxMenu?.x ?? 0, ctxMenu?.y ?? 0);
     closeCtxMenu();
-  }, [asDragItem, ctxMenu, sendItemToDesktop]);
+  }, [asDragItem, ctxMenu]);
 
   const deleteCtxRow = useCallback(async () => {
     const row = explorerCtxRef.current ?? ctxMenu?.row ?? null;
@@ -998,7 +1014,7 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
                   {!!r2Prefix && (<tr onClick={goUp} onDoubleClick={goUp} style={{ cursor: "url('/cursors/arrow.png') 0 0, default" }} title="Up to parent folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> ..</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Parent Folder</td></tr>)}
                   {r2Folders.map((fd) => {
                     const sel = selected === `r2d:${fd}`;
-                    return (<tr key={`d:${fd}`} onPointerDown={(e) => onFileRowPointerDown(e, { kind: "folder", prefix: `${r2Prefix}${fd}/`, name: fd })} onClick={() => setSelected(sel ? null : `r2d:${fd}`)} onDoubleClick={() => enterR2(`${r2Prefix}${fd}/`)} onContextMenu={(e)=> onRowContextMenu(e, {t:"r2-folder", name:fd, prefix:`${r2Prefix}${fd}/`})} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "url('/cursors/arrow.png') 0 0, default", touchAction: "pan-y" }} title="Drag to the Desktop to copy this folder"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {fd}</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Folder</td></tr>);
+                    return (<tr key={`d:${fd}`} onPointerDown={(e) => onFileRowPointerDown(e, { kind: "folder", prefix: `${r2Prefix}${fd}/`, name: fd })} onClick={() => setSelected(sel ? null : `r2d:${fd}`)} onDoubleClick={() => enterR2(`${r2Prefix}${fd}/`)} onContextMenu={(e)=> onRowContextMenu(e, {t:"r2-folder", name:fd, prefix:`${r2Prefix}${fd}/`})} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "url('/cursors/arrow.png') 0 0, default", touchAction: "pan-y" }} title="Drag to the Desktop to copy (Alt=shortcut) · right-click Create Shortcut for a shortcut"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.folderClosed} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {fd}</td><td style={{ textAlign: "center" }}></td><td style={{ textAlign: "center" }}>Folder</td></tr>);
                   })}
                   {r2Files.map((f) => {
                     const name = r2NameOfKey(f.key);

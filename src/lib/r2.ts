@@ -24,7 +24,7 @@ export type R2DragItem =
   | { kind: "folder"; prefix: string; name: string }
   | { kind: "vfs-file"; id: string; name: string; mime: string; size: number }
   /** 実体のない仮想エントリ (C:\系静的表示など)。ドロップ先でショートカット化する */
-  | { kind: "shortcut"; label: string; appId?: string; explorerPath?: string; iconSrc?: string; vfsId?: string };
+  | { kind: "shortcut"; label: string; appId?: string; explorerPath?: string; iconSrc?: string; vfsId?: string; r2Key?: string; r2Prefix?: string; r2Mime?: string; r2Size?: number };
 
 export function normalizePrefix(p: string): string {
   const s = p.replace(/^\/+/, "");
@@ -36,6 +36,12 @@ export function r2NameOfKey(key: string): string {
   const s = key.replace(/\/$/, "");
   const i = s.lastIndexOf("/");
   return i >= 0 ? s.slice(i + 1) : s;
+}
+
+export function formatR2Path(prefix: string): string {
+  const p = normalizePrefix(prefix);
+  if (!p) return "R2:\\";
+  return "R2:\\" + p.replace(/\//g, "\\").replace(/\\$/, "");
 }
 
 export async function listR2(prefix: string): Promise<R2List> {
