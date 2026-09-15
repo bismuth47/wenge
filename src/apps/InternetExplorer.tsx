@@ -598,11 +598,15 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
           const sel = doc!.getSelection?.()?.toString() || iframe.contentWindow?.getSelection?.()?.toString();
           if (sel && sel.trim()) selText = sel.slice(0, 200);
         } catch {}
+        // iframe内のclientX/Yはiframeビューポート基準なので、外側ウィンドウ基準に
+        // 直してから仮想化する (直さないとツールバー+窓位置ぶん左上にずれる)。
         // 仮想画面の論理pxに換算して保持する (仮想画面基準のfixed配置のため)
-        const v = toVirtualPoint(e.clientX, e.clientY);
+        const frameRect = iframe.getBoundingClientRect();
+        const v = toVirtualPoint(frameRect.left + e.clientX, frameRect.top + e.clientY);
         setIeMenu({ x: v.x, y: v.y, linkUrl, imgUrl, selText });
       } catch {
-        const v = toVirtualPoint(e.clientX, e.clientY);
+        const frameRect = iframe.getBoundingClientRect();
+        const v = toVirtualPoint(frameRect.left + e.clientX, frameRect.top + e.clientY);
         setIeMenu({ x: v.x, y: v.y });
       }
     };
