@@ -167,6 +167,34 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
   const navigateToRef = useRef<(raw: string, tabId?: string) => void>(() => {});
+  const addTabRef = useRef<(initialUrl?: string) => string>(() => "");
+
+  // postMessageで届いたURLをWenge IE内の遷移先として解決する。
+  // 子iframeは解決済み絶対URL(元サイトURL)を送る想定だが、念のため
+  // /api/proxy?url=... 形式が来たら内側URLを取り出す。
+  function unwrapProxyUrl(raw: string): string {
+    const s = raw.trim();
+    try {
+      const m = s.match(/\/api\/proxy\?url=([^&]+)/);
+      if (m?.[1]) {
+        try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+      }
+      const u = new URL(s, window.location.origin);
+      if (u.pathname === "/api/proxy" && u.searchParams.get("url")) {
+        return u.searchParams.get("url")!;
+      }
+    } catch {}
+    return s;
+  }
+
+  function isVfsFileUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      return /\.(mp3|wav|ogg|m4a|flac|mp4|webm|zip|rar|7z|pdf|png|jpg|jpeg|gif|bmp|webp|svg|txt|doc|docx|xls|xlsx)(\?|#|$)/i.test(u.pathname + u.search);
+    } catch {
+      return /\.(mp3|wav|ogg|m4a|flac|mp4|webm|zip|rar|7z|pdf|png|jpg|jpeg|gif|bmp|webp|svg|txt|doc|docx|xls|xlsx)(\?|#|$)/i.test(url);
+    }
+  }
 
   const closeTab = useCallback((id: string) => {
     try { ctxCleanupMap.current.get(id)?.(); } catch {}
@@ -325,6 +353,52 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
   useEffect(() => {
     navigateToRef.current = (raw: string, tabId?: string) => navigateTo(raw, tabId);
   }, [navigateTo]);
+
+  useEffect(() => {
+    addTabRef.current = (initialUrl?: string) => addTab(initialUrl);
+  }, [addTab]);
+
+  // iframe内注入スクリプトからの遷移要求を受け、Wenge IE内で開く。
+  // _blank / window.open → 新規IEタブ、それ以外(通常左クリック/_self) → 同じタブで遷移。
+  // 実機ブラウザには一切飛ばさない。
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      try {
+        if (e.origin !== window.location.origin) return;
+      } catch { return; }
+      const d = e.data as { type?: string; url?: string; target?: string; kind?: string } | null;
+      if (!d || d.type !== "wenge-ie-navigate" || typeof d.url !== "string") return;
+      let srcTabId: string | null = null;
+      iframeEls.current.forEach((el, id) => {
+        if (el?.contentWindow === e.source) srcTabId = id;
+      });
+      const fromId = srcTabId ?? activeTabIdRef.current;
+      if (!fromId) return;
+      const inner = unwrapProxyUrl(d.url);
+      if (/^(javascript|data|blob|mailto|tel):/i.test(inner)) return;
+      const normalized = normalizeUrl(inner);
+      if (!normalized) return;
+      if (isVfsFileUrl(normalized)) {
+        try {
+          const name = fileNameForSave(normalized, null);
+          const dir = getVfsDirByExt(name);
+          void saveUrlToVfs(normalized, dir, { filename: name }).catch(() => {
+            showError("Download", "VFS保存に失敗しました。");
+          });
+        } catch {
+          showError("Download", "リンクの保存に失敗しました。");
+        }
+        return;
+      }
+      if (d.target === "_blank") {
+        addTabRef.current(normalized);
+      } else {
+        navigateToRef.current(normalized, fromId);
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   const goBack = (tabId?: string) => {
     const id = tabId ?? activeTabIdRef.current;
@@ -493,8 +567,8 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     } catch {}
     if (tab?.currentUrl) updateTab(tabId, { statusText: `互換表示(プロキシ経由): ${tab.currentUrl}`, error: null });
 
-    // Attach link interceptor for VFS downloads (media files, archives, etc.)
-    const cleanupClick = attachVfsLinkInterceptor(tabId);
+    // Attach link interceptor (fallback for injected script) + VFS downloads
+    const cleanupClick = attachIeLinkInterceptor(tabId);
     if (cleanupClick) {
       try { linkCleanupMap.current.get(tabId)?.(); } catch {}
       linkCleanupMap.current.set(tabId, cleanupClick);
@@ -507,12 +581,18 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
     updateTab(tabId, { loading: false, error: "ページの読み込みに失敗しました。別の検索で試してください。", statusText: "Error loading document" });
   };
 
-  /** iframe内のDLリンク（拡張子ベース）を横取りしてVFSに保存する */
-  const attachVfsLinkInterceptor = useCallback((tabId: string) => {
+  /**
+   * iframe内の全リンククリック/フォーム送信を横取りする(親側フォールバック)。
+   * プロキシ注入スクリプトがCSP等で動かない場合・srcdoc表示の場合の二重網。
+   * - ファイル系URL → VFS保存(遷移しない)
+   * - target=_blank / Ctrl+クリック / 中クリック / window.open相当 → Wenge内新規IEタブ
+   * - 通常左クリック(_self/無指定) → 同じタブでプロキシ遷移
+   * いずれもpreventDefaultで実機ブラウザへの飛び出しを阻止する。
+   */
+  const attachIeLinkInterceptor = useCallback((tabId: string) => {
     const iframe = iframeEls.current.get(tabId);
     if (!iframe) return;
-    const tab = tabs.find((t) => t.id === tabId);
-    const baseUrl = tab?.currentUrl || "";
+    const baseUrl = tabs.find((t) => t.id === tabId)?.currentUrl || "";
     let doc: Document | null = null;
     try {
       doc = iframe.contentDocument;
@@ -520,30 +600,79 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
       return;
     }
     if (!doc) return;
+    const resolveAbs = (href: string): string | null => {
+      try {
+        return new URL(href, iframe.contentWindow?.location.href || doc.baseURI || baseUrl).toString();
+      } catch { return null; }
+    };
+    const routeUrl = (absolute: string, target: string) => {
+      const inner = unwrapProxyUrl(absolute);
+      if (/^(javascript|data|blob|mailto|tel):/i.test(inner)) return;
+      if (isVfsFileUrl(inner)) {
+        try {
+          const name = fileNameForSave(inner, null);
+          const dir = getVfsDirByExt(name);
+          void saveUrlToVfs(inner, dir, { filename: name }).catch(() => {
+            showError("Download", "VFS保存に失敗しました。");
+          });
+        } catch {
+          showError("Download", "リンクの保存に失敗しました。");
+        }
+        return;
+      }
+      const normalized = normalizeUrl(inner);
+      if (!normalized) return;
+      if (target === "_blank") {
+        addTabRef.current(normalized);
+      } else {
+        navigateToRef.current(normalized, tabId);
+      }
+    };
     const onClick = (e: MouseEvent) => {
-      const anchor = (e.target as Element).closest("a[href]");
+      const anchor = (e.target as Element).closest?.("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
       const href = anchor.getAttribute("href");
       if (!href || /^javascript:/i.test(href) || /^data:/i.test(href)) return;
-      const isFile = /\.(mp3|wav|ogg|m4a|flac|mp4|webm|zip|rar|7z|pdf|png|jpg|jpeg|gif|bmp|webp|svg|txt|doc|docx|xls|xlsx)$/i.test(href);
-      if (!isFile) return;
+      if (href.startsWith("#")) return;
+      const absolute = resolveAbs(href);
+      if (!absolute || !/^https?:/i.test(absolute)) return;
+      // 実機への飛び出しを阻止
       e.preventDefault();
       e.stopPropagation();
-      try {
-        const absolute = new URL(href, iframe.contentWindow?.location.href || baseUrl).toString();
-        const name = fileNameForSave(absolute, null);
-        const dir = getVfsDirByExt(name);
-        saveUrlToVfs(absolute, dir, { filename: name }).catch(() => {
-          showError("Download", "VFS保存に失敗しました。");
-        });
-      } catch {
-        showError("Download", "リンクの保存に失敗しました。");
-      }
+      const t = (anchor.getAttribute("target") || "").toLowerCase();
+      const isNew = t === "_blank" || e.ctrlKey || e.metaKey;
+      routeUrl(absolute, isNew ? "_blank" : "_self");
+    };
+    const onAuxClick = (e: MouseEvent) => {
+      if (e.button !== 1) return;
+      const anchor = (e.target as Element).closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href) return;
+      const absolute = resolveAbs(href);
+      if (!absolute || !/^https?:/i.test(absolute)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      routeUrl(absolute, "_blank");
+    };
+    const onSubmit = (e: Event) => {
+      const f = e.target as HTMLFormElement | null;
+      if (!f || f.tagName !== "FORM") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const action = resolveAbs(f.getAttribute("action") || "");
+      if (!action || !/^https?:/i.test(action)) return;
+      const t = (f.getAttribute("target") || "").toLowerCase();
+      routeUrl(action, t === "_blank" ? "_blank" : "_self");
     };
     doc.addEventListener("click", onClick, true);
+    doc.addEventListener("auxclick", onAuxClick, true);
+    doc.addEventListener("submit", onSubmit, true);
     // cleanup on next navigation
     const cleanup = () => {
       doc.removeEventListener("click", onClick, true);
+      doc.removeEventListener("auxclick", onAuxClick, true);
+      doc.removeEventListener("submit", onSubmit, true);
     };
     return cleanup;
   }, [tabs]);
@@ -923,7 +1052,7 @@ export function InternetExplorerApp({ file }: { file?: VfsFile | null }) {
                   ref={setIframeEl(t.id)}
                   src={iframeSrcFor(t)}
                   title={`Wenge IE ${t.title}`}
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-downloads"
                   allow="fullscreen; autoplay; clipboard-read; clipboard-write"
                   style={{ width: "100%", height: "100%", border: "none", background: "#fff" }}
                   onLoad={() => handleIframeLoad(t.id)}
