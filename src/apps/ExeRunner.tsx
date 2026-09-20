@@ -4,6 +4,7 @@ import { showError, showInfo } from "../components/SystemDialog";
 import { ICONS } from "../assets/icons";
 import type { VfsFile } from "../lib/vfs/types";
 import { RUN_ALIASES } from "./RunDialog";
+import { DosPlayer, isDosExecutable } from "./DosPlayer";
 
 type Props = {
   file?: VfsFile | null;
@@ -32,38 +33,62 @@ export function ExeRunnerApp({ file, onLaunchApp }: Props) {
   const alias = resolveAlias(fileName);
   const lower = fileName.toLowerCase();
   const isSetup = /^(setup|install|installer).*\.exe$/i.test(fileName) || lower === "setup.exe";
-  const [phase, setPhase] = useState<"idle" | "running" | "done">("idle");
+  const [phase, setPhase] = useState<"idle" | "running" | "done" | "dos">("idle");
   const [progress, setProgress] = useState(0);
   const [log, setLog] = useState<string[]>([]);
   const [headerInfo, setHeaderInfo] = useState<string | null>(null);
+  const [isDos, setIsDos] = useState<boolean | null>(null);
 
-  // Peek PE header for realism
+  // Peek PE header for realism + DOS vs PE classification
   useEffect(() => {
     if (!file?.blob) {
       if (alias) setHeaderInfo(`Known Wenge program → ${alias}`);
       else if (isSetup) setHeaderInfo("Installer executable");
       else setHeaderInfo("Windows executable (PE)");
+      setIsDos(null);
       return;
     }
-    // Check MZ magic
-    file.blob.slice(0, 4).arrayBuffer().then((buf) => {
+    let cancelled = false;
+    // Fast MZ check + full PE check
+    file.blob.slice(0, 8192).arrayBuffer().then(async (buf) => {
+      if (cancelled) return;
       const b = new Uint8Array(buf);
-      const isMz = b[0] === 0x4d && b[1] === 0x5a;
-      // Simple heuristic: if starts with MZ => DOS/PE exe
-      if (isMz) {
-        if (alias) setHeaderInfo(`Valid PE executable · maps to "${alias}"`);
-        else setHeaderInfo("Valid DOS/PE executable (MZ header detected)");
-      } else {
-        // Not an MZ — maybe renamed file
+      const isMz = b.length >= 2 && b[0] === 0x4d && b[1] === 0x5a;
+      if (!isMz) {
         if (file.blob.type === "application/x-msdownload" || /\.(exe|com)$/i.test(file.name)) {
           setHeaderInfo(`Extension indicates executable · ${alias ? `maps to "${alias}"` : "unknown program"}`);
         } else {
           setHeaderInfo("Not a recognized executable format");
         }
+        setIsDos(false);
+        return;
+      }
+      // Check PE header via e_lfanew
+      let isPe = false;
+      if (b.length >= 0x40) {
+        const e_lfanew = b[0x3c] | (b[0x3d] << 8) | (b[0x3e] << 16) | (b[0x3f] << 24);
+        if (e_lfanew > 0 && e_lfanew + 6 <= b.length) {
+          isPe = b[e_lfanew] === 0x50 && b[e_lfanew + 1] === 0x45 && b[e_lfanew + 2] === 0 && b[e_lfanew + 3] === 0;
+        } else if (e_lfanew + 6 > b.length) {
+          // need larger slice
+          try {
+            isPe = !(await isDosExecutable(file as VfsFile));
+          } catch { isPe = true; }
+        }
+      }
+      if (isPe) {
+        if (alias) setHeaderInfo(`Valid PE executable · maps to "${alias}"`);
+        else setHeaderInfo("Valid Win32 PE executable (MZ+PE header) — requires Wine, shows simulation");
+        setIsDos(false);
+      } else {
+        setHeaderInfo(alias ? `Valid DOS executable · maps to "${alias}"` : "Valid DOS executable (MZ, no PE) — runnable in DOSBox");
+        setIsDos(true);
       }
     }).catch(() => {
       setHeaderInfo(alias ? `Known program → ${alias}` : "Executable");
+      setIsDos(null);
     });
+    return () => { cancelled = true; };
   }, [file, alias, isSetup]);
 
   const run = async () => {
@@ -83,6 +108,12 @@ export function ExeRunnerApp({ file, onLaunchApp }: Props) {
     }
     if (alias && !onLaunchApp) {
       showInfo("Execute", `${fileName} maps to "${alias}" but launcher is not available.`);
+      return;
+    }
+
+    // Pure DOS exe -> launch real DOSBox via js-dos
+    if (isDos && file?.blob) {
+      setPhase("dos");
       return;
     }
 
@@ -147,10 +178,12 @@ export function ExeRunnerApp({ file, onLaunchApp }: Props) {
               <>
                 This executable is a built-in Wenge program. Click <b>Run</b> to launch <b>{alias}</b>.
               </>
+            ) : isDos ? (
+              <>DOS program detected — click <b>Run</b> to launch it in DOSBox (js-dos). Pure DOS MZ files run for real; Win32 PE files are only simulated.</>
             ) : isSetup ? (
               <>Setup program — click <b>Run</b> to start the simulated installer.</>
             ) : (
-              <>Windows executable. Wenge will try to run it in emulated mode. Native Win32 PE binaries cannot run directly in the browser — a simulated execution will be shown.</>
+              <>Windows executable. Wenge will try to run it in emulated mode. Native Win32 PE binaries cannot run directly in the browser — a simulated execution will be shown. Drop a DOS <code>.exe</code>/.<code>com</code> for real execution.</>
             )}
           </div>
           {headerInfo && (
@@ -163,45 +196,56 @@ export function ExeRunnerApp({ file, onLaunchApp }: Props) {
 
       <Separator />
 
-      <Frame variant="well" style={{ flex: 1, background: "#000", color: "#c0c0c0", padding: 6, overflow: "auto", fontFamily: "monospace", fontSize: 11, minHeight: 84 }}>
-        {log.length === 0 ? (
-          <div style={{ color: "#808080" }}>Ready. Press Run to execute.</div>
-        ) : (
-          log.map((l, i) => (
-            <div key={i} style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{l}</div>
-          ))
-        )}
-        {phase === "running" && <div style={{ marginTop: 6 }}><ProgressBar value={progress} /></div>}
-        {phase === "done" && (
-          <div style={{ marginTop: 6, color: alias ? "#00ff99" : isSetup ? "#00ff99" : "#ffd700" }}>
-            {alias ? `✓ Launched ${alias}` : isSetup ? "✓ Setup finished." : "✓ Execution finished (emulated)."}
+      {phase === "dos" && file ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <DosPlayer file={file as VfsFile} onExit={() => setPhase("idle")} />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 6 }}>
+            <Button onClick={() => setPhase("idle")}>Close DOSBox</Button>
           </div>
-        )}
-      </Frame>
+        </div>
+      ) : (
+        <>
+          <Frame variant="well" style={{ flex: 1, background: "#000", color: "#c0c0c0", padding: 6, overflow: "auto", fontFamily: "monospace", fontSize: 11, minHeight: 84 }}>
+            {log.length === 0 ? (
+              <div style={{ color: "#808080" }}>Ready. Press Run to execute.</div>
+            ) : (
+              log.map((l, i) => (
+                <div key={i} style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>{l}</div>
+              ))
+            )}
+            {phase === "running" && <div style={{ marginTop: 6 }}><ProgressBar value={progress} /></div>}
+            {phase === "done" && (
+              <div style={{ marginTop: 6, color: alias ? "#00ff99" : isSetup ? "#00ff99" : "#ffd700" }}>
+                {alias ? `✓ Launched ${alias}` : isSetup ? "✓ Setup finished." : "✓ Execution finished (emulated)."}
+              </div>
+            )}
+          </Frame>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, alignItems: "center" }}>
-        {phase === "running" ? (
-          <>
-            <span style={{ fontSize: 11, color: "#555", marginRight: "auto" }}>{progress}%</span>
-            <Button disabled>Run</Button>
-            <Button onClick={cancel}>Cancel</Button>
-          </>
-        ) : phase === "done" ? (
-          <>
-            <Button onClick={() => { setPhase("idle"); setProgress(0); setLog([]); }}>Run Again</Button>
-            <Button onClick={() => showInfo(fileName, alias ? `Program "${alias}" launched.` : isSetup ? "Setup completed.\nRestart is not required." : "Emulated execution completed.\nThis was a simulated run — native Win32 code is not executed in Wenge.")}>Details…</Button>
-          </>
-        ) : (
-          <>
-            <Button onClick={run} style={{ fontWeight: "bold" }}>Run</Button>
-            <Button onClick={() => showInfo("Properties", `File: ${fileName}\nSize: ${formatSize(blobSize)}\nType: ${mime}\n${headerInfo ?? ""}`)}>Properties…</Button>
-            <Button onClick={cancel}>Cancel</Button>
-          </>
-        )}
-      </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, alignItems: "center" }}>
+            {phase === "running" ? (
+              <>
+                <span style={{ fontSize: 11, color: "#555", marginRight: "auto" }}>{progress}%</span>
+                <Button disabled>Run</Button>
+                <Button onClick={cancel}>Cancel</Button>
+              </>
+            ) : phase === "done" ? (
+              <>
+                <Button onClick={() => { setPhase("idle"); setProgress(0); setLog([]); }}>Run Again</Button>
+                <Button onClick={() => showInfo(fileName, alias ? `Program "${alias}" launched.` : isSetup ? "Setup completed.\nRestart is not required." : isDos ? "DOS execution finished. Win32 PE would need Wine and is only simulated." : "Emulated execution completed.\nThis was a simulated run — native Win32 PE code is not executed in Wenge.\nDrop a pure DOS .exe/.com for real DOSBox execution.")}>Details…</Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={run} style={{ fontWeight: "bold" }}>Run{isDos ? " in DOSBox" : ""}</Button>
+                <Button onClick={() => showInfo("Properties", `File: ${fileName}\nSize: ${formatSize(blobSize)}\nType: ${mime}\n${headerInfo ?? ""}\nDOS runnable: ${isDos ? "yes (js-dos)" : isDos === false ? "no (Win32 PE)" : "unknown"}`)}>Properties…</Button>
+                <Button onClick={cancel}>Cancel</Button>
+              </>
+            )}
+          </div>
+        </>
+      )}
 
       <div style={{ fontSize: 10, color: "#808080", lineHeight: 1.3, borderTop: "1px solid #c0c0c0", paddingTop: 6 }}>
-        Hint: Drop any <code>.exe</code> / <code>.com</code> from your OS or R2 onto the Desktop — double-click will open it here. Known programs (notepad.exe, calc.exe, winmine.exe, mplayer.exe, etc.) launch their Wenge app directly.
+        Hint: Drop any <code>.exe</code> / <code>.com</code> from your OS or R2 onto the Desktop — double-click will open it here. Pure DOS MZ files run for real in DOSBox (js-dos); Win32 PE is simulated and known names (notepad.exe, calc.exe, winmine.exe, etc.) launch their Wenge app directly.
       </div>
     </div>
   );
