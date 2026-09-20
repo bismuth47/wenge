@@ -1,6 +1,6 @@
 import type { VfsFile } from "./types";
 
-export type VfsOpenTarget = "notepad" | "wordpad" | "image-viewer" | "media-player" | "preview" | "explorer" | "ie" | "msdos";
+export type VfsOpenTarget = "notepad" | "wordpad" | "image-viewer" | "media-player" | "preview" | "explorer" | "ie" | "msdos" | "exe";
 
 const TEXT_EXTS = new Set(["txt", "md", "markdown", "json", "js", "ts", "tsx", "css", "xml", "csv", "log", "ini"]);
 const HTML_EXTS = new Set(["html"]);
@@ -9,10 +9,21 @@ const DOC_EXTS = new Set(["doc", "rtf"]);
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "flac", "mid", "midi"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "ogv", "mov"]);
+const EXE_EXTS = new Set(["exe", "com", "scr", "pif", "msi"]);
+
+export function isExeFile(file: { name: string; mime?: string }): boolean {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (EXE_EXTS.has(ext)) return true;
+  const mime = (file.mime || "").toLowerCase();
+  if (mime === "application/x-msdownload" || mime === "application/x-msdos-program" || mime === "application/vnd.microsoft.portable-executable") return true;
+  return false;
+}
 
 export function vfsOpenTarget(file: VfsFile): VfsOpenTarget {
   const mime = (file.mime || "").toLowerCase();
   const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (EXE_EXTS.has(ext)) return "exe";
+  if (mime === "application/x-msdownload" || mime === "application/x-msdos-program" || mime === "application/vnd.microsoft.portable-executable") return "exe";
   if (HTML_EXTS.has(ext)) return "ie";
   if (mime.startsWith("image/") || IMAGE_EXTS.has(ext)) return "image-viewer";
   if (mime.startsWith("audio/") || mime.startsWith("video/") || AUDIO_EXTS.has(ext) || VIDEO_EXTS.has(ext)) return "media-player";

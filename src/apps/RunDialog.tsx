@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Button, Frame, TextInput } from "react95";
 import { showError } from "../components/SystemDialog";
 import { ICONS } from "../assets/icons";
+import { setPendingVfsFile } from "../lib/vfs/openWith";
+import { guessMime } from "../lib/r2";
 
 export const RUN_ALIASES: Record<string, string> = {
   "notepad": "notepad", "notepad.exe": "notepad",
@@ -46,9 +48,32 @@ export function RunDialog({ onClose, onRun }: { onClose?: () => void; onRun?: (i
   const submit = (raw?: string) => {
     const src = (raw ?? cmd).trim();
     if (!src) { showError("Run", "Type the name of a program."); return; }
-    const id = (RUN_ALIASES as any)[src.toLowerCase()];
-    if (id) { onRun?.(id); onClose?.(); }
-    else showError("Run", "Cannot find '" + src + "'.\nCheck the spelling and try again.");
+    const lower = src.toLowerCase();
+    const id = (RUN_ALIASES as any)[lower];
+    if (id) { onRun?.(id); onClose?.(); return; }
+    // .exe フォールバック: Wengeで任意の.exeを実行できるようにする
+    // 例: "setup.exe" や "C:\Wenge\MyApp.exe" をタイプした場合、ExeRunnerで模擬実行する
+    const base = src.split(/[\\/]/).pop() ?? src;
+    if (/\.(exe|com|scr|pif|msi)$/i.test(base)) {
+      const synthetic: any = {
+        id: `run:${Date.now()}`,
+        path: src.includes("\\") || src.includes("/") ? src : `C:\\Wenge\\${base}`,
+        name: base,
+        dir: "C:\\Wenge",
+        mime: guessMime(base),
+        size: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        blob: new Blob([], { type: guessMime(base) }),
+      };
+      try { setPendingVfsFile(synthetic); (window as any).__wengePendingVfs = synthetic; } catch {}
+      // ExeRunnerにファイル名を渡すためにonRunに合成fileを添える（呼び出し側で解釈）
+      // 後方互換: 第2引数にfileを渡す
+      (onRun as any)?.("exe-runner", synthetic);
+      onClose?.();
+      return;
+    }
+    showError("Run", "Cannot find '" + src + "'.\nCheck the spelling and try again.");
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

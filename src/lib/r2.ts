@@ -132,6 +132,12 @@ export function guessMime(name: string, fallback = "application/octet-stream"): 
     jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp",
     webp: "image/webp", svg: "image/svg+xml", mp3: "audio/mpeg", wav: "audio/wav",
     mp4: "video/mp4", pdf: "application/pdf",
+    exe: "application/x-msdownload", com: "application/x-msdos-program", scr: "application/x-msdownload",
+    bat: "application/x-msdos-program", msi: "application/x-msi",
   };
   return map[ext] || fallback;
+}
+
+export function isExeName(name: string): boolean {
+  return /\.(exe|com|scr|pif|msi)$/i.test(name);
 }

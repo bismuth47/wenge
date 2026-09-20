@@ -38,6 +38,7 @@ import { MinesweeperApp } from "./apps/Minesweeper";
 import { MediaPlayerApp } from "./apps/MediaPlayer";
 import { WordPadApp } from "./apps/WordPad";
 import { MsDosApp } from "./apps/MsDos";
+import { ExeRunnerApp } from "./apps/ExeRunner";
 import { ClockApp } from "./apps/ClockApp";
 import { CharMapApp } from "./apps/CharMap";
 import { SoundRecorderApp } from "./apps/SoundRecorder";
@@ -92,6 +93,7 @@ type AppId =
   | "notepad"
   | "wordpad"
   | "msdos"
+  | "exe-runner"
   | "clock"
   | "charmap"
   | "sound-recorder"
@@ -507,6 +509,7 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   calc: { title: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
   "image-viewer": { title: "Image Viewer", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 520, h: 480, component: <ImageViewerApp /> },
   explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 560, h: 400, component: <div /> },
+  "exe-runner": { title: "Program", icon: ICON_FALLBACK.fileWindows, iconSrc: ICONS.fileWindows, w: 420, h: 380, component: <div /> },
   run: { title: "Run", icon: ICON_FALLBACK.run, iconSrc: ICONS.run, w: 380, h: 200, component: <div /> },
 };
 
@@ -892,6 +895,7 @@ const toVfsFileProp = (f: DesktopDoc | undefined): VfsFile | null => {
 const notepadFile = useMemo(() => toVfsFileProp(vfsFileByApp["notepad"]), [vfsFileByApp]);
 const mediaPlayerFile = useMemo(() => toVfsFileProp(vfsFileByApp["media-player"]), [vfsFileByApp]);
 const imageViewerFile = useMemo(() => toVfsFileProp(vfsFileByApp["image-viewer"]), [vfsFileByApp]);
+const exeRunnerFile = useMemo(() => toVfsFileProp(vfsFileByApp["exe-runner"]), [vfsFileByApp]);
 
 // グリッドにスナップ
 const snapPos=(x:number,y:number,deskW:number,deskH:number)=>{
@@ -1435,6 +1439,16 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       return;
     }
+    if (target === "exe") {
+      // For known internal programs (notepad.exe etc.) we still open via ExeRunner
+      // which will offer to launch the mapped app. Direct alias jump would bypass the runner UI.
+      const exeDoc: DesktopDoc = { ...doc, name: vfsFile.name };
+      setPendingVfsFile(vfsFile as never);
+      setVfsFileByApp((prev) => ({ ...prev, ["exe-runner"]: exeDoc }));
+      setWindows((prev) => prev.map((w) => w.id === "exe-runner" ? { ...w, title: vfsFile.name } : w));
+      openWindow("exe-runner" as AppId, { silent: true });
+      return;
+    }
     const appId = (target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "media-player" ? "media-player" : target === "ie" ? "ie" : target === "msdos" ? "msdos" : "explorer") as AppId;
     // mount時に各アプリがconsumeできるようpendingにも積む + propで確実に渡す
     setPendingVfsFile(vfsFile as never);
@@ -1493,6 +1507,15 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
           sourceR2Key: sc.r2Key,
           blob,
         } as VfsFile;
+        if (target === "exe") {
+          const exeDoc = { id: vfsFile.id, name: vfsFile.name, mime: vfsFile.mime, size: vfsFile.size, createdAt: vfsFile.createdAt, updatedAt: vfsFile.updatedAt, sourceR2Key: vfsFile.sourceR2Key, sourceUrl: vfsFile.sourceUrl, blob: vfsFile.blob } as DesktopDoc;
+          setPendingVfsFile(vfsFile);
+          try { (window as any).__wengePendingVfs = vfsFile; } catch {}
+          setVfsFileByApp((prev) => ({ ...prev, ["exe-runner"]: exeDoc }));
+          setWindows((prev) => prev.map((w) => w.id === "exe-runner" ? { ...w, title: vfsFile.name } : w));
+          openWindow("exe-runner" as AppId, { silent: true });
+          return;
+        }
         const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "ie" ? "ie" : "media-player";
         setPendingVfsFile(vfsFile);
         try { (window as any).__wengePendingVfs = vfsFile; } catch {}
@@ -2467,8 +2490,8 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         const def = APP_DEFS[w.id];
         let comp: React.ReactNode = def.component;
         if (w.id === "recycle") comp = <RecycleBinApp playSound={playDing} />;
-        if (w.id === "explorer") comp = <ExplorerApp key={explorerOpenKey === 0 ? "explorer" : `explorer-${explorerOpenKey}`} initialPath={explorerInitPath} onOpenApp={(id, file) => { if (file) { const doc: DesktopDoc = { id: file.id, name: file.name, mime: file.mime || "", size: file.size, createdAt: file.createdAt, updatedAt: file.updatedAt, blob: file.blob, sourceUrl: file.sourceUrl, sourceR2Key: file.sourceR2Key }; setVfsFileByApp((prev) => ({ ...prev, [id]: doc })); } openWindow(id as AppId, { silent: true }); }} />;
-        if (w.id === "run") comp = <RunDialog onClose={() => closeWindow("run")} onRun={(id) => openWindow(id as AppId, { silent: true })} />;
+        if (w.id === "explorer") comp = <ExplorerApp key={explorerOpenKey === 0 ? "explorer" : `explorer-${explorerOpenKey}`} initialPath={explorerInitPath} onOpenApp={(id, file) => { if (file) { const doc: DesktopDoc = { id: file.id, name: file.name, mime: file.mime || "", size: file.size, createdAt: file.createdAt, updatedAt: file.updatedAt, blob: file.blob, sourceUrl: file.sourceUrl, sourceR2Key: file.sourceR2Key }; setVfsFileByApp((prev) => ({ ...prev, [id]: doc })); if (id === "exe-runner") setWindows((prev) => prev.map((w) => w.id === "exe-runner" ? { ...w, title: file.name } : w)); } openWindow(id as AppId, { silent: true }); }} />;
+        if (w.id === "run") comp = <RunDialog onClose={() => closeWindow("run")} onRun={(id: any, file?: any) => { if (file) { const doc = { id: file.id, name: file.name, mime: file.mime || "", size: file.size ?? 0, createdAt: file.createdAt, updatedAt: file.updatedAt, blob: file.blob } as DesktopDoc; setVfsFileByApp((prev) => ({ ...prev, [id]: doc })); if (id === "exe-runner") setWindows((prev) => prev.map((w) => w.id === "exe-runner" ? { ...w, title: file.name } : w)); } openWindow(id as AppId, { silent: true }); }} />;
         if (w.id === "notepad") {
           const f = vfsFileByApp["notepad"];
           comp = (
@@ -2493,6 +2516,9 @@ const isOverRecycleAt=(vx:number,vy:number)=>{
         }
         if (w.id === "ie") {
           comp = <InternetExplorerApp key={ieFile ? `vfs-${ieFile.id}` : "blank"} file={ieFile} />;
+        }
+        if (w.id === "exe-runner") {
+          comp = <ExeRunnerApp key={exeRunnerFile ? `vfs-${exeRunnerFile.id}` : "blank"} file={exeRunnerFile as never} onLaunchApp={(id) => openWindow(id as AppId, { silent: true })} />;
         }
         return (
           <div key={w.id} style={{ display: w.isMinimized ? "none" : "contents" }}>
