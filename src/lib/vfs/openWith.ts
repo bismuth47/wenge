@@ -1,6 +1,6 @@
 import type { VfsFile } from "./types";
 
-export type VfsOpenTarget = "notepad" | "wordpad" | "image-viewer" | "media-player" | "preview" | "explorer" | "ie" | "msdos" | "exe";
+export type VfsOpenTarget = "notepad" | "wordpad" | "image-viewer" | "media-player" | "preview" | "explorer" | "ie" | "msdos" | "exe" | "java";
 
 const TEXT_EXTS = new Set(["txt", "md", "markdown", "json", "js", "ts", "tsx", "css", "xml", "csv", "log", "ini"]);
 const HTML_EXTS = new Set(["html"]);
@@ -10,6 +10,7 @@ const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "flac", "mid", "midi"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "ogv", "mov"]);
 const EXE_EXTS = new Set(["exe", "com", "scr", "pif", "msi"]);
+const JAVA_EXTS = new Set(["jar"]);
 
 export function isExeFile(file: { name: string; mime?: string }): boolean {
   const ext = (file.name.split(".").pop() || "").toLowerCase();
@@ -19,9 +20,19 @@ export function isExeFile(file: { name: string; mime?: string }): boolean {
   return false;
 }
 
+export function isJavaFile(file: { name: string; mime?: string }): boolean {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (JAVA_EXTS.has(ext)) return true;
+  const mime = (file.mime || "").toLowerCase();
+  if (mime === "application/java-archive" || mime === "application/x-java-archive") return true;
+  return false;
+}
+
 export function vfsOpenTarget(file: VfsFile): VfsOpenTarget {
   const mime = (file.mime || "").toLowerCase();
   const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (JAVA_EXTS.has(ext)) return "java";
+  if (mime === "application/java-archive" || mime === "application/x-java-archive") return "java";
   if (EXE_EXTS.has(ext)) return "exe";
   if (mime === "application/x-msdownload" || mime === "application/x-msdos-program" || mime === "application/vnd.microsoft.portable-executable") return "exe";
   if (HTML_EXTS.has(ext)) return "ie";

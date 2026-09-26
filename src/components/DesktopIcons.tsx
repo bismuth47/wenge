@@ -14,6 +14,7 @@ function iconFor(mime: string, name: string): string {
   if (t === "image-viewer") return ICONS.paint;
   if (t === "media-player") return ICONS.mediaPlayer;
   if (t === "notepad" || t === "wordpad") return ICONS.notepad;
+  if (t === "java") return ICONS.java;
   return ICONS.fileWindows;
 }
 

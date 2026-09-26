@@ -231,6 +231,12 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
       onOpenApp?.("exe-runner", f);
       return;
     }
+    if (target === "java") {
+      setPendingVfsFile(f);
+      try { (window as any).__wengePendingVfs = f; } catch {}
+      onOpenApp?.("java", f);
+      return;
+    }
     const appId = target === "notepad" ? "notepad" : target === "wordpad" ? "wordpad" : target === "image-viewer" ? "image-viewer" : target === "ie" ? "ie" : target === "msdos" ? "msdos" : "media-player";
     setPendingVfsFile(f);
     try {
@@ -265,6 +271,28 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
         setPendingVfsFile(vfsFile);
         try { (window as any).__wengePendingVfs = vfsFile; } catch {}
         onOpenApp?.("exe-runner", vfsFile);
+      } catch (e: any) {
+        showError("R2 File Share", e?.message || "Cannot open file.");
+      } finally {
+        setR2Busy(null);
+      }
+      return;
+    }
+    if (target === "java") {
+      setR2Busy(`Opening ${name}...`);
+      try {
+        const res = await fetch(f.url);
+        if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+        const blob = await res.blob();
+        const vfsFile = {
+          id: `r2:${f.key}`, path: `R2:/${f.key}`, name, dir: "R2:/",
+          mime: blob.type || mime, size: blob.size || f.size,
+          createdAt: f.uploadedAt, updatedAt: f.uploadedAt,
+          sourceUrl: f.url, sourceR2Key: f.key, blob,
+        } as VfsFile;
+        setPendingVfsFile(vfsFile);
+        try { (window as any).__wengePendingVfs = vfsFile; } catch {}
+        onOpenApp?.("java", vfsFile);
       } catch (e: any) {
         showError("R2 File Share", e?.message || "Cannot open file.");
       } finally {
@@ -348,6 +376,24 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
     goTo(parts.length <= 1 ? "C:\\" : parts.join("\\"));
   };
   const openEntry = (f: FEntry) => {
+    // .jar は JavaRunner (CheerpJ) で実行する。
+    if (/\.jar$/i.test(f.name)) {
+      if (f.app && onOpenApp) { onOpenApp(f.app); return; }
+      const synthetic: VfsFile = {
+        id: `fs:${f.name}`,
+        path: `${key}\\${f.name}`,
+        name: f.name,
+        dir: key,
+        mime: guessMime(f.name),
+        size: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        blob: new Blob([], { type: guessMime(f.name) }),
+      } as VfsFile;
+      setPendingVfsFile(synthetic);
+      try { (window as any).__wengePendingVfs = synthetic; } catch {}
+      if (onOpenApp) { onOpenApp("java", synthetic); return; }
+    }
     // .exe は ExeRunner 経由で「動かせる」ようにする。既知エイリアスはアプリ直接起動、未知はRunnerの模擬実行。
     if (/\.(exe|com|scr|pif|msi)$/i.test(f.name)) {
       if (f.app && onOpenApp) { onOpenApp(f.app); return; }
@@ -1085,7 +1131,7 @@ export function ExplorerApp({ onOpenApp, initialPath }: { onOpenApp?: (id: any, 
                   {vfsFiles.map((f) => {
                     const sel = selected === `vfs:${f.id}`;
                     const t = vfsOpenTarget(f);
-                    const label = t === "exe" ? "Application" : t === "msdos" ? "MS-DOS Batch" : t === "image-viewer" ? "Image" : t === "media-player" ? "Media" : t === "ie" ? "HTML" : t === "notepad" ? "Text" : t === "wordpad" ? "Document" : t;
+                    const label = t === "exe" ? "Application" : t === "java" ? "Java" : t === "msdos" ? "MS-DOS Batch" : t === "image-viewer" ? "Image" : t === "media-player" ? "Media" : t === "ie" ? "HTML" : t === "notepad" ? "Text" : t === "wordpad" ? "Document" : t;
                     return (<tr key={f.id} onPointerDown={(e) => onFileRowPointerDown(e, { kind: "vfs-file", id: f.id, name: f.name, mime: f.mime, size: f.size })} onClick={() => setSelected(sel ? null : `vfs:${f.id}`)} onDoubleClick={() => openVfsEntry(f.id)} onContextMenu={(e)=> onRowContextMenu(e, {t:"vfs-file", id:f.id, name:f.name, mime:f.mime, size:f.size})} style={{ borderTop: "1px solid #c0c0c0", background: sel ? "#000080" : "transparent", color: sel ? "#fff" : "#000", cursor: "url('/cursors/arrow.png') 0 0, default", touchAction: "pan-y" }} title="Drag to the Desktop to move (Ctrl=copy, Alt=shortcut) · double-click to open in app"><td style={{ padding: 3, display: "flex", alignItems: "center", gap: 4 }}><img src={ICONS.fileWindows} alt="" width={16} height={16} style={{ imageRendering: "pixelated" as const }} draggable={false} onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} /> {f.name}</td><td style={{ textAlign: "center" }}>{formatSize(f.size)}</td><td style={{ textAlign: "center" }}>{label}</td></tr>);
                   })}
                 </tbody>

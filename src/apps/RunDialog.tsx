@@ -26,6 +26,7 @@ export const RUN_ALIASES: Record<string, string> = {
   "backup": "backup", "scandisk": "scandisk", "sysmon": "sysmon",
   "briefcase": "briefcase", "dialer": "dialer", "network": "network",
   "recycle": "recycle", "charmap": "charmap", "charmap.exe": "charmap",
+  "java": "java",
 };
 
 export const RUN_PROGRAMS = [
@@ -70,6 +71,24 @@ export function RunDialog({ onClose, onRun }: { onClose?: () => void; onRun?: (i
       // ExeRunnerにファイル名を渡すためにonRunに合成fileを添える（呼び出し側で解釈）
       // 後方互換: 第2引数にfileを渡す
       (onRun as any)?.("exe-runner", synthetic);
+      onClose?.();
+      return;
+    }
+    // .jar フォールバック: JavaRunner(CheerpJ)で実行する
+    if (/\.jar$/i.test(base)) {
+      const synthetic: any = {
+        id: `run:${Date.now()}`,
+        path: src.includes("\\") || src.includes("/") ? src : `C:\\Wenge\\${base}`,
+        name: base,
+        dir: "C:\\Wenge",
+        mime: guessMime(base),
+        size: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        blob: new Blob([], { type: guessMime(base) }),
+      };
+      try { setPendingVfsFile(synthetic); (window as any).__wengePendingVfs = synthetic; } catch {}
+      (onRun as any)?.("java", synthetic);
       onClose?.();
       return;
     }

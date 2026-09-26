@@ -40,6 +40,7 @@ export const ICONS = {
   dialer: "/icons/dialer.png",
   network: "/icons/network.png",
   cdPlayer: "/icons/cdplayer.png",
+  java: "/icons/file_windows.png",
 } as const;
 
 // Fallback emoji for when image fails to load
@@ -82,4 +83,5 @@ export const ICON_FALLBACK: Record<string, string> = {
   dialer: "☎️",
   network: "🌐",
   cdPlayer: "💿",
+  java: "☕",
 };

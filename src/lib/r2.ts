@@ -134,8 +134,13 @@ export function guessMime(name: string, fallback = "application/octet-stream"): 
     mp4: "video/mp4", pdf: "application/pdf",
     exe: "application/x-msdownload", com: "application/x-msdos-program", scr: "application/x-msdownload",
     bat: "application/x-msdos-program", msi: "application/x-msi",
+    jar: "application/java-archive", class: "application/java-vm",
   };
   return map[ext] || fallback;
+}
+
+export function isJavaName(name: string): boolean {
+  return /\.jar$/i.test(name);
 }
 
 export function isExeName(name: string): boolean {
