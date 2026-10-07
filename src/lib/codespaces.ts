@@ -14,6 +14,17 @@ export type Codespace = {
 
 export type Machine = { name: string; display_name: string };
 
+export type CodespacePort = {
+  port: number;
+  protocol: string;
+  visibility: string;
+  port_url: string;
+  name?: string | null;
+  state?: string;
+};
+
+export type CodespaceWithPorts = Codespace & { ports: CodespacePort[]; };
+
 async function gh(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -69,6 +80,34 @@ export const stopCodespace = (token: string, name: string) =>
 
 export const deleteCodespace = (token: string, name: string) =>
   gh(token, `/user/codespaces/${encodeURIComponent(name)}`, { method: "DELETE" });
+
+// Get exposed ports for a codespace (requires repo context: owner/repo)
+export const listCodespacePorts = (
+  token: string,
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<{ ports: CodespacePort[] }> =>
+  gh(
+    token,
+    `/repos/${owner}/${repo}/codespaces/${encodeURIComponent(name)}/ports`,
+  );
+
+// Resolve owner/repo for a codespace using its repository.full_name, fallback to web_url
+export const repoFromCodespace = (c: Codespace): { owner: string; repo: string } | null => {
+  if (c.repository?.full_name) {
+    const m = c.repository.full_name.split("/");
+    if (m.length >= 2) return { owner: m[0], repo: m[1] };
+  }
+  if (c.web_url) {
+    // https://github.com/owner/repo ...-codespaces -{uuid}
+    const u = new URL(c.web_url);
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length >= 2 && parts[0] === "codespaces") return null; // web_url for codespace is like .../codespaces/<name>
+    if (parts.length >= 2) return { owner: parts[0], repo: parts[1] };
+  }
+  return null;
+};
 
 export const parseRepo = (s: string): { owner: string; repo: string } | null => {
   const m = s.trim().match(/^([\w.-]+)\/([\w.-]+)$/);
