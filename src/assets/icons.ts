@@ -41,6 +41,7 @@ export const ICONS = {
   network: "/icons/network.png",
   cdPlayer: "/icons/cdplayer.png",
   java: "/icons/file_windows.png",
+  codespaces: "/icons/codespaces.png",
 } as const;
 
 // Fallback emoji for when image fails to load
@@ -84,4 +85,5 @@ export const ICON_FALLBACK: Record<string, string> = {
   network: "🌐",
   cdPlayer: "💿",
   java: "☕",
+  codespaces: "🖥️",
 };

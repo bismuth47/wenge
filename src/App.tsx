@@ -57,6 +57,7 @@ import { DialerApp } from "./apps/Dialer";
 import { NetworkApp } from "./apps/Network";
 import { CdPlayerApp } from "./apps/CdPlayer";
 import { ImageViewerApp } from "./apps/ImageViewer";
+import { CodespacesApp } from "./apps/Codespaces";
 import { ICONS, ICON_FALLBACK } from "./assets/icons";
 import { R2_DRAG_MIME, formatR2Path, guessMime, listR2, listR2Flat, markWengeDragEnd, markWengeDragStart, normalizePrefix, r2NameOfKey, type R2DragItem, type WengeDropAction } from "./lib/r2";
 import {
@@ -123,6 +124,7 @@ type AppId =
   | "calc"
   | "explorer"
   | "image-viewer"
+  | "codespaces"
   | "run";
 
 type WinState = {
@@ -510,6 +512,7 @@ const APP_DEFS: Record<AppId, { title: string; icon: string; iconSrc: string; w:
   paint: { title: "Paint", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 500, h: 380, component: <PaintApp /> },
   calc: { title: "Calculator", icon: ICON_FALLBACK.calc, iconSrc: ICONS.calc, w: 220, h: 300, component: <CalcApp /> },
   "image-viewer": { title: "Image Viewer", icon: ICON_FALLBACK.paint, iconSrc: ICONS.paint, w: 520, h: 480, component: <ImageViewerApp /> },
+  codespaces: { title: "Codespaces", icon: ICON_FALLBACK.codespaces, iconSrc: ICONS.codespaces, w: 620, h: 520, component: <CodespacesApp /> },
   explorer: { title: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer, w: 560, h: 400, component: <div /> },
   "exe-runner": { title: "Program", icon: ICON_FALLBACK.fileWindows, iconSrc: ICONS.fileWindows, w: 420, h: 380, component: <div /> },
   java: { title: "Java", icon: ICON_FALLBACK.java, iconSrc: ICONS.java, w: 640, h: 560, component: <div /> },
@@ -526,7 +529,7 @@ const PROGRAMS_GROUPS: ProgramsGroup[] = [
   { label: "Games", ids: ["minesweeper", "solitaire", "freecell", "hearts"] },
   { label: "System Tools", ids: ["scandisk", "backup", "sysmon"] },
 ];
-const PROGRAMS_TOP: AppId[] = ["my-computer", "explorer", "file-share", "chat", "briefcase", "dialer", "network"];
+const PROGRAMS_TOP: AppId[] = ["my-computer", "explorer", "file-share", "chat", "codespaces", "briefcase", "dialer", "network"];
 
 // --- Documentsメニュー構成 (実機Win95準拠: Explorerを直接開かずカスケード表示) ---
 // ExplorerApp の "C:\\Wenge\\Documents" と同期させる。appId があるものは
@@ -811,6 +814,7 @@ const [desktopIcons, setDesktopIcons] = useState<{ id: AppId; label: string; ico
     { id: "explorer", label: "Explorer", icon: ICON_FALLBACK.explorer, iconSrc: ICONS.explorer },
     { id: "ie", label: "Internet Explorer", icon: ICON_FALLBACK.ie, iconSrc: ICONS.ie },
     { id: "chat", label: "Wenge Chat", icon: ICON_FALLBACK.chat, iconSrc: ICONS.chat },
+    { id: "codespaces", label: "Codespaces", icon: ICON_FALLBACK.codespaces, iconSrc: ICONS.codespaces },
     { id: "help", label: "Help", icon: ICON_FALLBACK.help, iconSrc: ICONS.help },
   ] as { id: AppId; label: string; icon: string; iconSrc: string }[];
   try{

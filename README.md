@@ -24,6 +24,7 @@ React + TypeScript + `react95` + `styled-components` で構築された Windows 
 | 🌐 | Internet Explorer | レトロブラウザモック |
 | 📁 | ファイル共有 | Cloudflare R2 連携 |
 | 💬 | Wenge チャット | Vercel + Turso + Pusher リアルタイムチャット |
+| 🖥️ | Codespaces | GitHub PATで遠隔一覧・作成・起動/停止・削除・ブラウザで開く |
 | ⚙️ | コントロールパネル | 背景・音量設定 |
 | 💣 | マインスイーパ | 8x8 マイン探索 |
 | ℹ️ | Wenge について | OS情報 |
