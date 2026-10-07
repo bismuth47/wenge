@@ -97,6 +97,15 @@ export function CodespacesApp() {
     }
   };
 
+  const openCodespace = (c: Codespace) => {
+    const url = c.web_url || `https://github.com/codespaces/${c.name}`;
+    const w = window.open(url, "_blank", "noopener,noreferrer");
+    if (!w) {
+      // ポップアップブロック時はURLを出して手動で開けるようにする
+      prompt("ポップアップがブロックされました。このURLをコピーして開いてください:", url);
+    }
+  };
+
   const act = async (name: string, fn: (t: string, n: string) => Promise<unknown>) => {
     setBusy(name);
     setError("");
@@ -173,7 +182,7 @@ export function CodespacesApp() {
                   <td>{c.state}</td>
                   <td>
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {c.web_url && <Button size="sm" onClick={() => window.open(c.web_url, "_blank")}>Open</Button>}
+                      <Button size="sm" title={c.web_url || `https://github.com/codespaces/${c.name}`} onClick={() => openCodespace(c)}>Open</Button>
                       <Button size="sm" disabled={busy === c.name} onClick={() => act(c.name, startCodespace)}>Start</Button>
                       <Button size="sm" disabled={busy === c.name} onClick={() => act(c.name, stopCodespace)}>Stop</Button>
                       <Button size="sm" disabled={busy === c.name} onClick={() => { if (confirm(`Delete ${c.name}?`)) act(c.name, deleteCodespace); }}>Del</Button>
