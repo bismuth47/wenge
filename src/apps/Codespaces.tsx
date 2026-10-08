@@ -3,6 +3,7 @@ import { Button, Fieldset, Select, TextInput } from "react95";
 import {
   createCodespace,
   deleteCodespace,
+  execCommand,
   listCodespaces,
   listMachines,
   parseRepo,
@@ -10,10 +11,12 @@ import {
   stopCodespace,
   type Codespace,
   type Machine,
-} from "../lib/codespaces";
+  type TerminalCommandResult,
+} from "../lib/codespaceExec";
 
 const LS_PAT = "wenge_gh_pat";
 const LS_REPO = "wenge_gh_repo";
+const LS_CS_SECRET = "wenge_cs_secret";
 
 export function CodespacesApp() {
   const [token, setToken] = useState(() => localStorage.getItem(LS_PAT) ?? "");
@@ -25,6 +28,13 @@ export function CodespacesApp() {
   const [items, setItems] = useState<Codespace[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [csSecret, setCsSecret] = useState(() => localStorage.getItem(LS_CS_SECRET) ?? "");
+  const [savedSecret, setSavedSecret] = useState(() => !!localStorage.getItem(LS_CS_SECRET));
+  const [cmdHistory, setCmdHistory] = useState<{ cmd: string; result?: TerminalCommandResult; ts: number }[]>([]);
+  const [cmdInput, setCmdInput] = useState("");
+  const [cmdBusy, setCmdBusy] = useState(false);
+  const [selectedPort, setSelectedPort] = useState<string | null>(null);
+  const [selectedCodeInfo, setSelectedCodeInfo] = useState<Codespace | null>(null);
 
   const activeToken = saved ? (localStorage.getItem(LS_PAT) ?? "") : "";
 
@@ -33,7 +43,8 @@ export function CodespacesApp() {
     setBusy("list");
     setError("");
     try {
-      setItems(await listCodespaces(t));
+      const list = await listCodespaces(t);
+      setItems(list);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -101,7 +112,6 @@ export function CodespacesApp() {
     const url = c.web_url || `https://github.com/codespaces/${c.name}`;
     const w = window.open(url, "_blank", "noopener,noreferrer");
     if (!w) {
-      // ポップアップブロック時はURLを出して手動で開けるようにする
       prompt("ポップアップがブロックされました。このURLをコピーして開いてください:", url);
     }
   };
@@ -117,6 +127,49 @@ export function CodespacesApp() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const selectCodespace = async (c: Codespace) => {
+    setSelectedCodeInfo(c);
+    if (activeToken && c.repository?.full_name) {
+      const [owner, repo] = c.repository.full_name.split("/");
+      try {
+        const { ports } = await listCodespacePorts(activeToken, owner, repo, c.name);
+        setSelectedCodeInfo({ ...c, ports });
+        if (ports.some(p => p.visibility === "public")) {
+          const pub = ports.find(p => p.visibility === "public");
+          setSelectedPort(pub?.port_url ?? null);
+        }
+      } catch (e) {
+        // 無視
+      }
+    }
+  };
+
+  const runCommand = async () => {
+    if (!cmdInput.trim() || !selectedCodeInfo || !selectedPort) return;
+    setCmdBusy(true);
+    const start = Date.now();
+    try {
+      const res = await execCommand(selectedPort, csSecret, cmdInput.trim());
+      setCmdHistory(prev => [{ cmd: cmdInput, result: res, ts: start }, ...prev]);
+    } catch (e: any) {
+      setCmdHistory(prev => [{ cmd: cmdInput, result: { stdout: "", stderr: e?.message || String(e), exitCode: 1 }, ts: start }, ...prev]);
+    } finally {
+      setCmdBusy(false);
+      setCmdInput("");
+    }
+  };
+
+  const saveSecret = () => {
+    if (!csSecret.trim()) return;
+    localStorage.setItem(LS_CS_SECRET, csSecret.trim());
+    setSavedSecret(true);
+  };
+  const clearSecret = () => {
+    localStorage.removeItem(LS_CS_SECRET);
+    setCsSecret("");
+    setSavedSecret(false);
   };
 
   return (
@@ -186,6 +239,7 @@ export function CodespacesApp() {
                       <Button size="sm" disabled={busy === c.name} onClick={() => act(c.name, startCodespace)}>Start</Button>
                       <Button size="sm" disabled={busy === c.name} onClick={() => act(c.name, stopCodespace)}>Stop</Button>
                       <Button size="sm" disabled={busy === c.name} onClick={() => { if (confirm(`Delete ${c.name}?`)) act(c.name, deleteCodespace); }}>Del</Button>
+                      <Button size="sm" onClick={() => selectCodespace(c)}>Terminal</Button>
                     </div>
                   </td>
                 </tr>
@@ -194,6 +248,110 @@ export function CodespacesApp() {
           </table>
         )}
       </div>
+
+      {selectedCodeInfo && (
+        <div style={{ marginTop: 8 }}>
+          <Fieldset label={`Terminal — ${selectedCodeInfo.display_name || selectedCodeInfo.name}`}>
+            {csSecret ? (
+              <div>
+                <div style={{ fontSize: 11, marginBottom: 8 }}>
+                  コマンド履歴 ({cmdHistory.length} 件)
+                </div>
+                <div
+                  style={{ border: "2px inset #fff", background: "#fff", height: 120, overflow: "auto", padding: 6, marginBottom: 8 }}
+                >
+                  {cmdHistory.length === 0 ? (
+                    <div style={{ color: "#888", textAlign: "center", marginTop: 30 }}>コマンド履歴はありません</div>
+                  ) : (
+                    cmdHistory.map((item, idx) => (
+                      <div key={idx} style={{ marginBottom: 4 }}>
+                        <div style={{ fontSize: 10, color: "#666" }}>{new Date(item.ts).toLocaleTimeString()}</div>
+                        <div style={{ fontFamily: "monospace", fontSize: 11 }}>{item.cmd}</div>
+                        {item.result && (
+                          <div>
+                            {item.result.stdout && (
+                              <div style={{ color: "#000", whiteSpace: "pre-wrap" }}>{item.result.stdout}</div>
+                            )}
+                            {item.result.stderr && (
+                              <div style={{ color: "#a00", whiteSpace: "pre-wrap" }}>{item.result.stderr}</div>
+                            )}
+                            <div style={{ fontSize: 10, color: item.result.exitCode === 0 ? "#080" : "#a00" }}>
+                              exit {item.result.exitCode}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <TextInput
+                    value={cmdInput}
+                    onChange={(e) => setCmdInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !cmdBusy && runCommand()}
+                    placeholder="コマンドを入力..."
+                    style={{ flex: 1 }}
+                  />
+                  <Button size="sm" onClick={runCommand} disabled={!selectedPort || !csSecret || cmdBusy}>
+                    {cmdBusy ? "実行中..." : "実行"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 11, marginBottom: 8 }}>Codespaceエージェントのシークレットを設定してください。</div>
+                <TextInput
+                  value={csSecret}
+                  onChange={(e) => setCsSecret(e.target.value)}
+                  type="password"
+                  placeholder="シークレット"
+                  style={{ marginBottom: 6 }}
+                />
+                <Button size="sm" onClick={saveSecret}>シークレットを保存</Button>
+              </div>
+            )}
+          </Fieldset>
+        </div>
+      )}
+
+      <Fieldset label="Tools">
+        <div style={{ display: "flex", gap: 6 }}>
+          <Button size="sm" onClick={() => { setSelectedCodeInfo(null); setActiveTab("list"); setCmdHistory([]); setCmdInput(""); setSelectedPort(null); setSelectedCodeInfo(null); }}>ターミナルに戻る</Button>
+        </div>
+      </Fieldset>
+
+      <Fieldset label="Secrets">
+        {savedSecret ? (
+          <div>
+            <div style={{ fontSize: 11 }}>
+              <strong>エージェントシークレット</strong> は保存済み (ブラウザ内のみ)
+            </div>
+            <Button size="sm" style={{ marginTop: 4 }} onClick={clearSecret}>Clear</Button>
+          </div>
+        ) : (
+          <div>
+            <TextInput
+              value={csSecret}
+              onChange={(e) => setCsSecret(e.target.value)}
+              type="password"
+              placeholder="エージェントシークレット"
+              style={{ marginBottom: 6 }}
+            />
+            <Button size="sm" onClick={saveSecret}>シークレットを保存</Button>
+          </div>
+        )}
+      </Fieldset>
+
+      <Fieldset label="Components">
+        <div>
+          <div style={{ fontSize: 11, marginBottom: 8 }}>追加予定のコンポーネント</div>
+          <ul style={{ fontSize: 11, margin: 0, paddingLeft: 20 }}>
+            <li>ポート監視</li>
+            <li>ログ管理</li>
+          </ul>
+        </div>
+      </Fieldset>
+
     </div>
   );
 }
